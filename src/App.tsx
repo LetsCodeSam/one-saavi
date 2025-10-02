@@ -262,6 +262,13 @@ export default function App() {
           {drawerOpen && <div className="drawer-backdrop mobile-only" onClick={() => setDrawerOpen(false)} />}
 
           <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
+              <button
+                className="mobile-only"
+                onClick={() => setDrawerOpen(false)}
+                style={{ marginBottom: 8 }}
+              >
+                ✕ Close
+              </button>
             <h3>Groups</h3>
             <GroupTree
               tree={groupTree}

@@ -60,10 +60,13 @@
     box-shadow: 0 10px 30px rgba(0,0,0,.18);
   }
   .drawer-backdrop {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,.25);
-    z-index: 20;
-  }
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.12); /* subtle dim instead of heavy black */
+  backdrop-filter: blur(2px);   /* optional: adds a soft blur effect */
+  z-index: 20;
+}
+
 }
 
 /* ---------- Mobile entry cards ---------- */
@@ -73,3 +76,5 @@
 .card-meta { font-size: 14px; opacity: .8; margin-bottom: 8px; word-break: break-word; }
 .card-actions { display: flex; gap: 8px; }
 .card-actions button { flex: 1 0 0; padding: 10px 0; }
+
+
