@@ -438,3 +438,39 @@ Show vault unlock even when offline.
 
 ✅ Current state (MVP): open/save, groups, search, entry list, editor, clipboard clear, responsive layout.
 📌 Next recommended step: New Entry / Delete Entry to make the app usable for editing, not just viewing.
+
+
+
+Auto-Lock Flow
+
+Default: 5 minutes (300 000 ms).
+
+Options: 1, 3, 5, 10, 15, 30 minutes (dropdown in toolbar).
+
+Manual lock: “Lock now” button in toolbar.
+
+Triggers:
+
+Idle for X minutes (no mouse, keyboard, or touch).
+
+Tab hidden (backgrounded) longer than the timeout.
+
+Explicit “Lock now”.
+
+Reset conditions:
+
+Any user activity (pointer, key, touch, mousemove) resets the timer.
+
+Unlocking a vault starts the timer fresh.
+
+Behavior:
+
+Decrypted DB is cleared from memory.
+
+Current group/entry selection reset.
+
+Clipboard is wiped best-effort.
+
+File handle (desktop) remains → you can re-unlock without re-picking file.
+
+On mobile you re-pick the file or use cached encrypted bytes.
