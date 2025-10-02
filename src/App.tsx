@@ -193,12 +193,28 @@ export default function App() {
     const pv = item._ref?.fields?.get ? item._ref.fields.get("Password") : item._ref?.fields?.Password;
     return unwrap(pv);
   }
-  async function copyAndClear(text: string, ms = 15000) {
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
-    setStatus("Copied to clipboard");
-    setTimeout(async () => { try { await navigator.clipboard.writeText(""); } catch {} }, ms);
-  }
+    async function copyAndClear(text: string, ms = 15000) {
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      setStatus(`Copied (clears in ${ms/1000}s)`);
+
+      // Countdown feedback
+      let secs = ms/1000;
+      const interval = setInterval(() => {
+        secs -= 1;
+        if (secs > 0) {
+          setStatus(`Copied (clears in ${secs}s)`);
+        } else {
+          clearInterval(interval);
+          try {
+            navigator.clipboard.writeText(" "); // overwrite with space
+            navigator.clipboard.writeText("");  // then clear
+          } catch {}
+          setStatus("Clipboard cleared");
+        }
+      }, 1000);
+    }
+
   function markDirty() { setDirty(true); setStatus("Edited"); }
 
   // ---------- UI ----------
