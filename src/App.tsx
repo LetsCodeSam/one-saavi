@@ -34,7 +34,10 @@ export default function App() {
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
 
-  // ----- OPEN (desktop / File System Access API) -----
+  // search query
+  const [q, setQ] = useState("");
+
+  // ----- OPEN (desktop) -----
   async function doOpen() {
     try {
       const h = await pickKdbx();
@@ -64,10 +67,10 @@ export default function App() {
     }
   }
 
-  // ----- MOBILE: open via <input type=file> & Save As (.kdbx) -----
+  // ----- MOBILE fallback -----
   async function handleMobileFile(file: File) {
     setFileName(file.name);
-    setHandle(null); // no persistent handle on iOS
+    setHandle(null);
     const bytes = await file.arrayBuffer();
     setPendingBytes(bytes);
     setUnlockOpen(true);
@@ -89,7 +92,7 @@ export default function App() {
     }
   }
 
-  // ----- Unlock handler used by the dialog -----
+  // ----- UNLOCK -----
   async function handleUnlock(password: string, keyFile?: File) {
     if (!pendingBytes) return;
     try {
@@ -102,7 +105,7 @@ export default function App() {
       setStatus(handle ? "Opened" : "Opened (mobile)");
 
       if (!hasFilePicker()) {
-        await saveVaultBytes(pendingBytes, fileName || "vault.kdbx"); // encrypted bytes only
+        await saveVaultBytes(pendingBytes, fileName || "vault.kdbx");
       }
       setUnlockOpen(false);
     } catch (e: any) {
@@ -112,7 +115,7 @@ export default function App() {
     }
   }
 
-  // ----- root group (prefer a group named "Saavi") -----
+  // ----- ROOT GROUP -----
   const rootGroup = useMemo(() => {
     if (!db) return null;
     let found: any = null;
@@ -125,7 +128,7 @@ export default function App() {
     return found || fallback;
   }, [db]);
 
-  // ----- build sidebar tree -----
+  // ----- GROUP TREE -----
   const groupTree: GroupNode | null = useMemo(() => {
     if (!rootGroup) return null;
     function build(g: any): GroupNode {
@@ -139,11 +142,10 @@ export default function App() {
     return build(rootGroup);
   }, [rootGroup]);
 
-  // ----- entries filtered by selected group -----
+  // ----- ENTRIES -----
   const entries = useMemo(() => {
     if (!db || !rootGroup) return [];
     const out: any[] = [];
-
     function collectAll(g: any) {
       g.entries?.forEach((en: any) => {
         out.push({
@@ -168,6 +170,17 @@ export default function App() {
     return out;
   }, [db, rootGroup, selectedGroupId]);
 
+  // ----- FILTERED entries (search) -----
+  const filteredEntries = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return entries;
+    return entries.filter((e: any) =>
+      (e.title || "").toLowerCase().includes(s) ||
+      (e.username || "").toLowerCase().includes(s) ||
+      (e.url || "").toLowerCase().includes(s)
+    );
+  }, [entries, q]);
+
   const selectedEntry = useMemo(
     () => entries.find((e) => e.uuid === openedEntryId)?._ref,
     [entries, openedEntryId]
@@ -180,18 +193,13 @@ export default function App() {
     const pv = item._ref?.fields?.get ? item._ref.fields.get("Password") : item._ref?.fields?.Password;
     return unwrap(pv);
   }
-
   async function copyAndClear(text: string, ms = 15000) {
     if (!text) return;
     await navigator.clipboard.writeText(text);
     setStatus("Copied to clipboard");
     setTimeout(async () => { try { await navigator.clipboard.writeText(""); } catch {} }, ms);
   }
-
-  function markDirty() {
-    setDirty(true);
-    setStatus("Edited");
-  }
+  function markDirty() { setDirty(true); setStatus("Edited"); }
 
   // ---------- UI ----------
   return (
@@ -201,30 +209,39 @@ export default function App() {
         Status: {status}{fileName ? ` • ${fileName}` : ""}{dirty ? " • Dirty" : ""}
       </p>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-        {/* Desktop path */}
-        <button onClick={doOpen}>Open .kdbx</button>
-        <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
+<div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+  <button onClick={doOpen}>Open .kdbx</button>
+  <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
 
-        {/* Mobile / unsupported browsers fallback */}
-        {!hasFilePicker() && (
-          <>
-            <label style={{ border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }}>
-              <input
-                type="file"
-                accept=".kdbx"
-                style={{ display: "none" }}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (file) await handleMobileFile(file);
-                }}
-              />
-              Open (mobile)
-            </label>
-            <button onClick={saveAsDownload} disabled={!db || !dirty}>Save As (.kdbx)</button>
-          </>
-        )}
-      </div>
+  {!hasFilePicker() && (
+    <>
+      <label style={{ border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }}>
+        <input
+          type="file"
+          accept=".kdbx"
+          style={{ display: "none" }}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (file) await handleMobileFile(file);
+          }}
+        />
+        Open (mobile)
+      </label>
+      <button onClick={saveAsDownload} disabled={!db || !dirty}>Save As (.kdbx)</button>
+    </>
+  )}
+
+  {/* Search input only shown once db is opened */}
+  {db && (
+    <input
+      placeholder="Search title, username, or URL…"
+      value={q}
+      onChange={(e) => setQ(e.target.value)}
+      style={{ padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6, minWidth: 260, flex: "1 0 260px" }}
+    />
+  )}
+</div>
+
 
       {db && (
         <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, marginTop: 20 }}>
@@ -234,9 +251,9 @@ export default function App() {
           </aside>
 
           <main>
-            <h2>Entries</h2>
+            <h2>Entries {q ? `(${filteredEntries.length})` : `(${entries.length})`}</h2>
             <EntryList
-              entries={entries}
+              entries={filteredEntries}
               onReveal={revealPassword}
               onCopy={copyAndClear}
               onOpen={(id) => setOpenedEntryId(id)}
@@ -255,7 +272,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Masked unlock dialog */}
       <UnlockDialog
         open={unlockOpen}
         onCancel={() => { setUnlockOpen(false); setPendingBytes(null); }}
