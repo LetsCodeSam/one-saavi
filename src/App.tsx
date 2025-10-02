@@ -6,6 +6,7 @@ import EntryView from "./ui/EntryView";
 import GroupTree, { GroupNode } from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
+import "./app.css";   // <-- import responsive/mobile styles
 
 // ---------- helpers ----------
 function unwrap(val: any): string {
@@ -36,6 +37,9 @@ export default function App() {
 
   // search query
   const [q, setQ] = useState("");
+
+  // mobile drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // ----- OPEN (desktop) -----
   async function doOpen() {
@@ -170,7 +174,7 @@ export default function App() {
     return out;
   }, [db, rootGroup, selectedGroupId]);
 
-  // ----- FILTERED entries (search) -----
+  // ----- FILTERED entries -----
   const filteredEntries = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return entries;
@@ -193,28 +197,15 @@ export default function App() {
     const pv = item._ref?.fields?.get ? item._ref.fields.get("Password") : item._ref?.fields?.Password;
     return unwrap(pv);
   }
-    async function copyAndClear(text: string, ms = 15000) {
-      if (!text) return;
-      await navigator.clipboard.writeText(text);
-      setStatus(`Copied (clears in ${ms/1000}s)`);
-
-      // Countdown feedback
-      let secs = ms/1000;
-      const interval = setInterval(() => {
-        secs -= 1;
-        if (secs > 0) {
-          setStatus(`Copied (clears in ${secs}s)`);
-        } else {
-          clearInterval(interval);
-          try {
-            navigator.clipboard.writeText(" "); // overwrite with space
-            navigator.clipboard.writeText("");  // then clear
-          } catch {}
-          setStatus("Clipboard cleared");
-        }
-      }, 1000);
-    }
-
+  async function copyAndClear(text: string, ms = 15000) {
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    setStatus(`Copied (clears in ${ms/1000}s)`);
+    setTimeout(async () => {
+      try { await navigator.clipboard.writeText(""); } catch {}
+      setStatus("Clipboard cleared");
+    }, ms);
+  }
   function markDirty() { setDirty(true); setStatus("Edited"); }
 
   // ---------- UI ----------
@@ -225,55 +216,71 @@ export default function App() {
         Status: {status}{fileName ? ` • ${fileName}` : ""}{dirty ? " • Dirty" : ""}
       </p>
 
-<div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-  <button onClick={doOpen}>Open .kdbx</button>
-  <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
+      {/* sticky topbar with buttons and search */}
+      <div className="topbar" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {db && (
+          <button className="mobile-only" onClick={() => setDrawerOpen(true)} aria-label="Open groups">
+            ☰ Groups
+          </button>
+        )}
 
-  {!hasFilePicker() && (
-    <>
-      <label style={{ border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }}>
-        <input
-          type="file"
-          accept=".kdbx"
-          style={{ display: "none" }}
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (file) await handleMobileFile(file);
-          }}
-        />
-        Open (mobile)
-      </label>
-      <button onClick={saveAsDownload} disabled={!db || !dirty}>Save As (.kdbx)</button>
-    </>
-  )}
+        <button onClick={doOpen}>Open .kdbx</button>
+        <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
 
-  {/* Search input only shown once db is opened */}
-  {db && (
-    <input
-      placeholder="Search title, username, or URL…"
-      value={q}
-      onChange={(e) => setQ(e.target.value)}
-      style={{ padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6, minWidth: 260, flex: "1 0 260px" }}
-    />
-  )}
-</div>
+        {!hasFilePicker() && (
+          <>
+            <label style={{ border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }}>
+              <input
+                type="file"
+                accept=".kdbx"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) await handleMobileFile(file);
+                }}
+              />
+              Open (mobile)
+            </label>
+            <button onClick={saveAsDownload} disabled={!db || !dirty}>Save As (.kdbx)</button>
+          </>
+        )}
 
+        {db && (
+          <input
+            className="toolbar-search"
+            placeholder="Search title, username, or URL…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            style={{ padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 }}
+          />
+        )}
+      </div>
 
       {db && (
-        <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, marginTop: 20 }}>
-          <aside style={{ borderRight: "1px solid #eee", paddingRight: 8 }}>
+        <div className="app-grid">
+          {/* Drawer backdrop */}
+          {drawerOpen && <div className="drawer-backdrop mobile-only" onClick={() => setDrawerOpen(false)} />}
+
+          <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
             <h3>Groups</h3>
-            <GroupTree tree={groupTree} selectedId={selectedGroupId} onSelect={setSelectedGroupId} />
+            <GroupTree
+              tree={groupTree}
+              selectedId={selectedGroupId}
+              onSelect={(id) => { setSelectedGroupId(id); setDrawerOpen(false); }}
+            />
           </aside>
 
-          <main>
+          <main className="main">
             <h2>Entries {q ? `(${filteredEntries.length})` : `(${entries.length})`}</h2>
-            <EntryList
-              entries={filteredEntries}
-              onReveal={revealPassword}
-              onCopy={copyAndClear}
-              onOpen={(id) => setOpenedEntryId(id)}
-            />
+            <div className="table-wrap">
+              <EntryList
+                entries={filteredEntries}
+                onReveal={revealPassword}
+                onCopy={copyAndClear}
+                onOpen={(id) => setOpenedEntryId(id)}
+              />
+            </div>
+
             {selectedEntry && (
               <div style={{ marginTop: 20 }}>
                 <EntryView
