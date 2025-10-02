@@ -44,7 +44,7 @@ export default function EntryView({ entry, onChange, onClose, onCopy }: Props) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <strong>Edit entry</strong>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setReveal((v) => !v)}>{reveal ? "Hide" : "Reveal"}</button>
+          <button onClick={() => setReveal((v) => !v)}>{reveal ? "Hide" : "Show"}</button>
           {onClose && <button onClick={onClose}>Close</button>}
         </div>
       </div>
@@ -53,53 +53,36 @@ export default function EntryView({ entry, onChange, onClose, onCopy }: Props) {
         <label style={{ alignSelf: "center" }}>Title</label>
         <input
           defaultValue={model.Title}
-          onChange={(e) => {
-            setField(entry, "Title", e.target.value);
-            onChange();
-          }}
+          onChange={(e) => { setField(entry, "Title", e.target.value); onChange(); }}
         />
         <span />
 
         <label style={{ alignSelf: "center" }}>Username</label>
         <input
           defaultValue={model.UserName}
-          onChange={(e) => {
-            setField(entry, "UserName", e.target.value);
-            onChange();
-          }}
+          onChange={(e) => { setField(entry, "UserName", e.target.value); onChange(); }}
         />
-        <button onClick={() => onCopy?.(getField(entry, "UserName"))}>Copy</button>
+        <button onClick={() => onCopy?.(getField(entry, "UserName"))}>User</button>
 
         <label style={{ alignSelf: "center" }}>URL</label>
         <input
           defaultValue={model.URL}
-          onChange={(e) => {
-            setField(entry, "URL", e.target.value);
-            onChange();
-          }}
+          onChange={(e) => { setField(entry, "URL", e.target.value); onChange(); }}
         />
-        <a href={model.URL || "#"} target="_blank" rel="noreferrer">
-          Open
-        </a>
+        <a href={model.URL || "#"} target="_blank" rel="noreferrer">Open</a>
 
         <label style={{ alignSelf: "center" }}>Password</label>
         <input
           type={reveal ? "text" : "password"}
           defaultValue={model.Password}
-          onChange={(e) => {
-            setField(entry, "Password", e.target.value);
-            onChange();
-          }}
+          onChange={(e) => { setField(entry, "Password", e.target.value); onChange(); }}
         />
-        <button onClick={() => onCopy?.(getField(entry, "Password"))}>Copy</button>
+        <button onClick={() => onCopy?.(getField(entry, "Password"))}>Pass</button>
 
         <label style={{ alignSelf: "start", marginTop: 6 }}>Notes</label>
         <textarea
           defaultValue={model.Notes}
-          onChange={(e) => {
-            setField(entry, "Notes", e.target.value);
-            onChange();
-          }}
+          onChange={(e) => { setField(entry, "Notes", e.target.value); onChange(); }}
           rows={6}
           style={{ resize: "vertical" }}
         />
