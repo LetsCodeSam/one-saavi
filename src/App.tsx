@@ -19,7 +19,7 @@ function field(en: any, key: string): string {
 }
 const hasFilePicker = () => "showOpenFilePicker" in window;
 
-// ---------- component ----------
+// ---------- component -----------
 export default function App() {
   const [db, setDb] = useState<any>(null);
   const [handle, setHandle] = useState<FileSystemFileHandle | null>(null);
