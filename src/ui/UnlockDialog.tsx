@@ -1,77 +1,49 @@
-import React, { useMemo, useState } from "react";
-import * as kdbxweb from "kdbxweb";
+import React, { useEffect, useRef, useState } from "react";
 
 type Props = {
-  entry: any;                 // kdbxweb entry
-  onChange: () => void;       // call when edited (to mark dirty)
-  onClose?: () => void;
-  onCopy?: (t: string) => Promise<void>;
+  open: boolean;
+  onCancel: () => void;
+  onUnlock: (password: string, keyFile?: File) => void;
 };
 
-function unwrap(v: any): string {
-  if (!v) return "";
-  return v.getText ? v.getText() : String(v);
-}
-function getField(en: any, key: string): string {
-  const v = en?.fields?.get ? en.fields.get(key) : en?.fields?.[key];
-  return unwrap(v);
-}
-function setField(en: any, key: string, val: string) {
-  if (key === "Password") {
-    en.fields.set("Password", kdbxweb.ProtectedValue.fromString(val ?? ""));
-  } else {
-    en.fields.set(key, val ?? "");
-  }
-  en.times.update();
-}
-
-export default function EntryView({ entry, onChange, onClose, onCopy }: Props) {
+export default function UnlockDialog({ open, onCancel, onUnlock }: Props) {
+  const [pw, setPw] = useState("");
   const [reveal, setReveal] = useState(false);
+  const [keyFile, setKeyFile] = useState<File | undefined>(undefined);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const model = useMemo(() => ({
-    Title: getField(entry, "Title"),
-    UserName: getField(entry, "UserName"),
-    URL: getField(entry, "URL"),
-    Password: getField(entry, "Password"),
-    Notes: getField(entry, "Notes"),
-  }), [entry]);
+  useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 0); }, [open]);
+
+  if (!open) return null;
 
   return (
-    <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <strong>Edit entry</strong>
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.35)",
+      display: "grid", placeItems: "center", zIndex: 50
+    }}>
+      <div style={{ background: "#fff", padding: 16, borderRadius: 8, minWidth: 320 }}>
+        <h3 style={{ marginTop: 0 }}>Unlock vault</h3>
+        <label style={{ display: "block", margin: "8px 0 4px" }}>Master password</label>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setReveal((v) => !v)}>{reveal ? "Hide" : "Reveal"}</button>
-          {onClose && <button onClick={onClose}>Close</button>}
+          <input
+            ref={inputRef}
+            type={reveal ? "text" : "password"}
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            style={{ flex: 1, padding: "6px 8px" }}
+            placeholder="••••••••"
+          />
+          <button onClick={() => setReveal(r => !r)}>{reveal ? "Hide" : "Show"}</button>
         </div>
-      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr auto", gap: 8, marginTop: 12 }}>
-        <label style={{ alignSelf: "center" }}>Title</label>
-        <input defaultValue={model.Title}
-               onChange={(e) => { setField(entry, "Title", e.target.value); onChange(); }} />
-        <span />
+        <label style={{ display: "block", margin: "12px 0 6px" }}>Key file (optional)</label>
+        <input type="file" accept=".key"
+               onChange={(e)=> setKeyFile(e.target.files?.[0] || undefined)} />
 
-        <label style={{ alignSelf: "center" }}>Username</label>
-        <input defaultValue={model.UserName}
-               onChange={(e) => { setField(entry, "UserName", e.target.value); onChange(); }} />
-        <button onClick={() => onCopy?.(getField(entry, "UserName"))}>Copy</button>
-
-        <label style={{ alignSelf: "center" }}>URL</label>
-        <input defaultValue={model.URL}
-               onChange={(e) => { setField(entry, "URL", e.target.value); onChange(); }} />
-        <a href={model.URL || "#"} target="_blank" rel="noreferrer">Open</a>
-
-        <label style={{ alignSelf: "center" }}>Password</label>
-        <input type={reveal ? "text" : "password"} defaultValue={model.Password}
-               onChange={(e) => { setField(entry, "Password", e.target.value); onChange(); }} />
-        <button onClick={() => onCopy?.(getField(entry, "Password"))}>Copy</button>
-
-        <label style={{ alignSelf: "start", marginTop: 6 }}>Notes</label>
-        <textarea defaultValue={model.Notes}
-                  onChange={(e) => { setField(entry, "Notes", e.target.value); onChange(); }}
-                  rows={6} style={{ resize: "vertical" }} />
-        <span />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+          <button onClick={onCancel}>Cancel</button>
+          <button onClick={() => onUnlock(pw, keyFile)} disabled={!pw}>Unlock</button>
+        </div>
       </div>
     </div>
   );

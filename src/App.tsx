@@ -4,22 +4,37 @@ import { openKdbx, saveKdbx } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
 import EntryView from "./ui/EntryView";
 import GroupTree, { GroupNode } from "./ui/GroupTree";
+import UnlockDialog from "./ui/UnlockDialog";
+import { saveVaultBytes } from "./fs/mobileStore";
 
-function unwrap(val: any): string { if (!val) return ""; return val.getText ? val.getText() : String(val); }
+// ---------- helpers ----------
+function unwrap(val: any): string {
+  if (!val) return "";
+  return val.getText ? val.getText() : String(val);
+}
 function field(en: any, key: string): string {
   const v = en?.fields?.get ? en.fields.get(key) : en?.fields?.[key];
   return unwrap(v);
 }
+const hasFilePicker = () => "showOpenFilePicker" in window;
 
+// ---------- component ----------
 export default function App() {
   const [db, setDb] = useState<any>(null);
   const [handle, setHandle] = useState<FileSystemFileHandle | null>(null);
   const [status, setStatus] = useState("Ready");
   const [fileName, setFileName] = useState("");
   const [dirty, setDirty] = useState(false);
+
+  // selection
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [openedEntryId, setOpenedEntryId] = useState<string | null>(null);
 
+  // unlock dialog plumbing
+  const [unlockOpen, setUnlockOpen] = useState(false);
+  const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
+
+  // ----- OPEN (desktop / File System Access API) -----
   async function doOpen() {
     try {
       const h = await pickKdbx();
@@ -27,17 +42,16 @@ export default function App() {
       const f = await h.getFile();
       setFileName(f.name);
       setHandle(h);
+
       const bytes = await readBytes(h);
-      const pw = prompt("Master password") ?? "";
-      const opened = await openKdbx(bytes, pw);
-      setDb(opened);
-      setDirty(false);
-      setSelectedGroupId(null);
-      setOpenedEntryId(null);
-      setStatus("Opened");
-    } catch (e: any) { setStatus(e?.message || "Open failed"); }
+      setPendingBytes(bytes);
+      setUnlockOpen(true);
+    } catch (e: any) {
+      setStatus(e?.message || "Open failed");
+    }
   }
 
+  // ----- SAVE (desktop) -----
   async function doSave() {
     if (!db || !handle) return;
     try {
@@ -45,10 +59,60 @@ export default function App() {
       await writeBytes(handle, out);
       setDirty(false);
       setStatus("Saved");
-    } catch (e: any) { setStatus(e?.message || "Save failed"); }
+    } catch (e: any) {
+      setStatus(e?.message || "Save failed");
+    }
   }
 
-  // Prefer group named "Saavi"; else default group; else first group
+  // ----- MOBILE: open via <input type=file> & Save As (.kdbx) -----
+  async function handleMobileFile(file: File) {
+    setFileName(file.name);
+    setHandle(null); // no persistent handle on iOS
+    const bytes = await file.arrayBuffer();
+    setPendingBytes(bytes);
+    setUnlockOpen(true);
+  }
+
+  async function saveAsDownload() {
+    if (!db) return;
+    try {
+      const out = await saveKdbx(db);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+      a.download = (fileName || "vault") + ".kdbx";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setDirty(false);
+      setStatus("Saved (download)");
+    } catch (e: any) {
+      setStatus(e?.message || "Save failed");
+    }
+  }
+
+  // ----- Unlock handler used by the dialog -----
+  async function handleUnlock(password: string, keyFile?: File) {
+    if (!pendingBytes) return;
+    try {
+      const keyBytes = keyFile ? await keyFile.arrayBuffer() : undefined;
+      const opened = await openKdbx(pendingBytes, password, keyBytes);
+      setDb(opened);
+      setDirty(false);
+      setSelectedGroupId(null);
+      setOpenedEntryId(null);
+      setStatus(handle ? "Opened" : "Opened (mobile)");
+
+      if (!hasFilePicker()) {
+        await saveVaultBytes(pendingBytes, fileName || "vault.kdbx"); // encrypted bytes only
+      }
+      setUnlockOpen(false);
+    } catch (e: any) {
+      setStatus(e?.message || "Unlock failed");
+    } finally {
+      setPendingBytes(null);
+    }
+  }
+
+  // ----- root group (prefer a group named "Saavi") -----
   const rootGroup = useMemo(() => {
     if (!db) return null;
     let found: any = null;
@@ -58,13 +122,10 @@ export default function App() {
     }
     db.groups?.forEach((g: any) => search(g));
     const fallback = db.getDefaultGroup?.() ?? db.groups?.[0] ?? null;
-    const root = found || fallback;
-    // debug: verify we picked something
-    // console.debug("root group:", root?.uuid?.id, unwrap(root?.name));
-    return root;
+    return found || fallback;
   }, [db]);
 
-  // Build the tree
+  // ----- build sidebar tree -----
   const groupTree: GroupNode | null = useMemo(() => {
     if (!rootGroup) return null;
     function build(g: any): GroupNode {
@@ -78,7 +139,7 @@ export default function App() {
     return build(rootGroup);
   }, [rootGroup]);
 
-  // Entries filtered by selected group (null → all under root)
+  // ----- entries filtered by selected group -----
   const entries = useMemo(() => {
     if (!db || !rootGroup) return [];
     const out: any[] = [];
@@ -112,6 +173,7 @@ export default function App() {
     [entries, openedEntryId]
   );
 
+  // ----- actions -----
   async function revealPassword(entryUuid: string): Promise<string> {
     const item = entries.find((e) => e.uuid === entryUuid);
     if (!item) return "";
@@ -125,8 +187,13 @@ export default function App() {
     setStatus("Copied to clipboard");
     setTimeout(async () => { try { await navigator.clipboard.writeText(""); } catch {} }, ms);
   }
-  function markDirty() { setDirty(true); setStatus("Edited"); }
 
+  function markDirty() {
+    setDirty(true);
+    setStatus("Edited");
+  }
+
+  // ---------- UI ----------
   return (
     <div style={{ maxWidth: 1100, margin: "1.5rem auto", fontFamily: "ui-sans-serif" }}>
       <h1 style={{ fontSize: 28, fontWeight: 700 }}>One Saavi</h1>
@@ -134,20 +201,36 @@ export default function App() {
         Status: {status}{fileName ? ` • ${fileName}` : ""}{dirty ? " • Dirty" : ""}
       </p>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        {/* Desktop path */}
         <button onClick={doOpen}>Open .kdbx</button>
         <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
+
+        {/* Mobile / unsupported browsers fallback */}
+        {!hasFilePicker() && (
+          <>
+            <label style={{ border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }}>
+              <input
+                type="file"
+                accept=".kdbx"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) await handleMobileFile(file);
+                }}
+              />
+              Open (mobile)
+            </label>
+            <button onClick={saveAsDownload} disabled={!db || !dirty}>Save As (.kdbx)</button>
+          </>
+        )}
       </div>
 
       {db && (
         <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, marginTop: 20 }}>
           <aside style={{ borderRight: "1px solid #eee", paddingRight: 8 }}>
             <h3>Groups</h3>
-            <GroupTree
-              tree={groupTree}
-              selectedId={selectedGroupId}
-              onSelect={setSelectedGroupId}
-            />
+            <GroupTree tree={groupTree} selectedId={selectedGroupId} onSelect={setSelectedGroupId} />
           </aside>
 
           <main>
@@ -171,6 +254,13 @@ export default function App() {
           </main>
         </div>
       )}
+
+      {/* Masked unlock dialog */}
+      <UnlockDialog
+        open={unlockOpen}
+        onCancel={() => { setUnlockOpen(false); setPendingBytes(null); }}
+        onUnlock={handleUnlock}
+      />
     </div>
   );
 }

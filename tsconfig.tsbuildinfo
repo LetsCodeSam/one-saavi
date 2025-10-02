@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/app/store.ts","./src/crypto/keepass.ts","./src/crypto/worker.ts","./src/fs/fileaccess.ts","./src/ui/app.tsx","./src/ui/entrylist.tsx","./src/ui/entryview.tsx","./src/ui/grouptree.tsx","./src/ui/unlockdialog.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/app/store.ts","./src/crypto/keepass.ts","./src/crypto/worker.ts","./src/fs/fileaccess.ts","./src/fs/mobilestore.ts","./src/ui/entrylist.tsx","./src/ui/entryview.tsx","./src/ui/grouptree.tsx","./src/ui/unlockdialog.tsx"],"version":"5.9.3"}
