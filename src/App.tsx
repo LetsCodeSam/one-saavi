@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
 import { openKdbx, saveKdbx } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
@@ -6,7 +6,7 @@ import EntryView from "./ui/EntryView";
 import GroupTree, { GroupNode } from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
-import "./app.css";   // <-- import responsive/mobile styles
+import "./app.css";   // responsive/mobile styles
 
 // ---------- helpers ----------
 function unwrap(val: any): string {
@@ -19,7 +19,7 @@ function field(en: any, key: string): string {
 }
 const hasFilePicker = () => "showOpenFilePicker" in window;
 
-// ---------- component -----------
+// ---------- component ----------
 export default function App() {
   const [db, setDb] = useState<any>(null);
   const [handle, setHandle] = useState<FileSystemFileHandle | null>(null);
@@ -40,6 +40,91 @@ export default function App() {
 
   // mobile drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // ---- Auto-lock timer ----
+  const [autoLockMins, setAutoLockMins] = useState<number>(5); // default 5 minutes
+  const idleTimer = useRef<number | null>(null);
+  const lastVisibleAt = useRef<number>(Date.now());
+
+  function clearIdleTimer() {
+    if (idleTimer.current != null) {
+      window.clearTimeout(idleTimer.current);
+      idleTimer.current = null;
+    }
+  }
+
+  function scheduleIdleTimer() {
+    clearIdleTimer();
+    if (!db || autoLockMins <= 0) return;
+    idleTimer.current = window.setTimeout(() => {
+      lockNow("Auto-locked after inactivity");
+    }, autoLockMins * 60_000);
+  }
+
+  function noteActivity() {
+    // Any user activity resets the timer if a DB is open
+    if (!db) return;
+    scheduleIdleTimer();
+  }
+
+  function onVisibilityChange() {
+    if (document.visibilityState === "visible") {
+      // If we were hidden longer than timeout, lock immediately
+      const hiddenForMs = Date.now() - lastVisibleAt.current;
+      if (hiddenForMs >= autoLockMins * 60_000 && db) {
+        lockNow("Auto-locked while tab was hidden");
+      } else {
+        scheduleIdleTimer();
+      }
+    } else {
+      lastVisibleAt.current = Date.now();
+    }
+  }
+
+  function lockNow(reason = "Locked") {
+    // Do not save automatically; just forget decrypted DB
+    if (!db) return;
+    setDb(null);
+    setSelectedGroupId(null);
+    setOpenedEntryId(null);
+    setQ("");
+    setDirty(false);
+    setUnlockOpen(false);
+    setDrawerOpen(false);
+    clearIdleTimer();
+    setStatus(reason);
+    // Optional: wipe clipboard once on lock (best-effort)
+    try {
+      navigator.clipboard.writeText(" ");
+      navigator.clipboard.writeText("");
+    } catch {}
+  }
+
+  // Hook up global activity listeners
+  useEffect(() => {
+    const act = () => noteActivity();
+    window.addEventListener("pointerdown", act, { passive: true });
+    window.addEventListener("keydown", act);
+    window.addEventListener("touchstart", act, { passive: true });
+    window.addEventListener("mousemove", act, { passive: true });
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pointerdown", act);
+      window.removeEventListener("keydown", act);
+      window.removeEventListener("touchstart", act);
+      window.removeEventListener("mousemove", act);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, autoLockMins]);
+
+  // Reschedule when autolock setting changes or when db opens/closes
+  useEffect(() => {
+    if (db) scheduleIdleTimer();
+    else clearIdleTimer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, autoLockMins]);
 
   // ----- OPEN (desktop) -----
   async function doOpen() {
@@ -112,6 +197,9 @@ export default function App() {
         await saveVaultBytes(pendingBytes, fileName || "vault.kdbx");
       }
       setUnlockOpen(false);
+
+      // start idle timer after a successful unlock
+      scheduleIdleTimer();
     } catch (e: any) {
       setStatus(e?.message || "Unlock failed");
     } finally {
@@ -205,8 +293,9 @@ export default function App() {
       try { await navigator.clipboard.writeText(""); } catch {}
       setStatus("Clipboard cleared");
     }, ms);
+    noteActivity(); // copying counts as activity
   }
-  function markDirty() { setDirty(true); setStatus("Edited"); }
+  function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
 
   // ---------- UI ----------
   return (
@@ -245,6 +334,27 @@ export default function App() {
           </>
         )}
 
+        {/* Auto-lock controls */}
+        {db && (
+          <>
+            <button onClick={() => lockNow("Locked manually")}>Lock now</button>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span>Auto-lock (mins)</span>
+              <select
+                value={autoLockMins}
+                onChange={(e) => setAutoLockMins(Number(e.target.value))}
+              >
+                <option value={1}>1</option>
+                <option value={3}>3</option>
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={15}>15</option>
+                <option value={30}>30</option>
+              </select>
+            </label>
+          </>
+        )}
+
         {db && (
           <input
             className="toolbar-search"
@@ -262,18 +372,11 @@ export default function App() {
           {drawerOpen && <div className="drawer-backdrop mobile-only" onClick={() => setDrawerOpen(false)} />}
 
           <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
-              <button
-                className="mobile-only"
-                onClick={() => setDrawerOpen(false)}
-                style={{ marginBottom: 8 }}
-              >
-                ✕ Close
-              </button>
             <h3>Groups</h3>
             <GroupTree
               tree={groupTree}
               selectedId={selectedGroupId}
-              onSelect={(id) => { setSelectedGroupId(id); setDrawerOpen(false); }}
+              onSelect={(id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); }}
             />
           </aside>
 
@@ -284,7 +387,7 @@ export default function App() {
                 entries={filteredEntries}
                 onReveal={revealPassword}
                 onCopy={copyAndClear}
-                onOpen={(id) => setOpenedEntryId(id)}
+                onOpen={(id) => { setOpenedEntryId(id); noteActivity(); }}
               />
             </div>
 
@@ -293,7 +396,7 @@ export default function App() {
                 <EntryView
                   entry={selectedEntry}
                   onChange={markDirty}
-                  onClose={() => setOpenedEntryId(null)}
+                  onClose={() => { setOpenedEntryId(null); noteActivity(); }}
                   onCopy={copyAndClear}
                 />
               </div>

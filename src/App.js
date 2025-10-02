@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
 import { openKdbx, saveKdbx } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
@@ -7,7 +7,7 @@ import EntryView from "./ui/EntryView";
 import GroupTree from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
-import "./app.css"; // <-- import responsive/mobile styles
+import "./app.css"; // responsive/mobile styles
 // ---------- helpers ----------
 function unwrap(val) {
     if (!val)
@@ -19,7 +19,7 @@ function field(en, key) {
     return unwrap(v);
 }
 const hasFilePicker = () => "showOpenFilePicker" in window;
-// ---------- component -----------
+// ---------- component ----------
 export default function App() {
     const [db, setDb] = useState(null);
     const [handle, setHandle] = useState(null);
@@ -36,6 +36,90 @@ export default function App() {
     const [q, setQ] = useState("");
     // mobile drawer state
     const [drawerOpen, setDrawerOpen] = useState(false);
+    // ---- Auto-lock timer ----
+    const [autoLockMins, setAutoLockMins] = useState(5); // default 5 minutes
+    const idleTimer = useRef(null);
+    const lastVisibleAt = useRef(Date.now());
+    function clearIdleTimer() {
+        if (idleTimer.current != null) {
+            window.clearTimeout(idleTimer.current);
+            idleTimer.current = null;
+        }
+    }
+    function scheduleIdleTimer() {
+        clearIdleTimer();
+        if (!db || autoLockMins <= 0)
+            return;
+        idleTimer.current = window.setTimeout(() => {
+            lockNow("Auto-locked after inactivity");
+        }, autoLockMins * 60000);
+    }
+    function noteActivity() {
+        // Any user activity resets the timer if a DB is open
+        if (!db)
+            return;
+        scheduleIdleTimer();
+    }
+    function onVisibilityChange() {
+        if (document.visibilityState === "visible") {
+            // If we were hidden longer than timeout, lock immediately
+            const hiddenForMs = Date.now() - lastVisibleAt.current;
+            if (hiddenForMs >= autoLockMins * 60000 && db) {
+                lockNow("Auto-locked while tab was hidden");
+            }
+            else {
+                scheduleIdleTimer();
+            }
+        }
+        else {
+            lastVisibleAt.current = Date.now();
+        }
+    }
+    function lockNow(reason = "Locked") {
+        // Do not save automatically; just forget decrypted DB
+        if (!db)
+            return;
+        setDb(null);
+        setSelectedGroupId(null);
+        setOpenedEntryId(null);
+        setQ("");
+        setDirty(false);
+        setUnlockOpen(false);
+        setDrawerOpen(false);
+        clearIdleTimer();
+        setStatus(reason);
+        // Optional: wipe clipboard once on lock (best-effort)
+        try {
+            navigator.clipboard.writeText(" ");
+            navigator.clipboard.writeText("");
+        }
+        catch { }
+    }
+    // Hook up global activity listeners
+    useEffect(() => {
+        const act = () => noteActivity();
+        window.addEventListener("pointerdown", act, { passive: true });
+        window.addEventListener("keydown", act);
+        window.addEventListener("touchstart", act, { passive: true });
+        window.addEventListener("mousemove", act, { passive: true });
+        document.addEventListener("visibilitychange", onVisibilityChange);
+        return () => {
+            window.removeEventListener("pointerdown", act);
+            window.removeEventListener("keydown", act);
+            window.removeEventListener("touchstart", act);
+            window.removeEventListener("mousemove", act);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [db, autoLockMins]);
+    // Reschedule when autolock setting changes or when db opens/closes
+    useEffect(() => {
+        if (db)
+            scheduleIdleTimer();
+        else
+            clearIdleTimer();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [db, autoLockMins]);
     // ----- OPEN (desktop) -----
     async function doOpen() {
         try {
@@ -107,6 +191,8 @@ export default function App() {
                 await saveVaultBytes(pendingBytes, fileName || "vault.kdbx");
             }
             setUnlockOpen(false);
+            // start idle timer after a successful unlock
+            scheduleIdleTimer();
         }
         catch (e) {
             setStatus(e?.message || "Unlock failed");
@@ -207,12 +293,13 @@ export default function App() {
             catch { }
             setStatus("Clipboard cleared");
         }, ms);
+        noteActivity(); // copying counts as activity
     }
-    function markDirty() { setDirty(true); setStatus("Edited"); }
+    function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
     // ---------- UI ----------
     return (_jsxs("div", { style: { maxWidth: 1100, margin: "1.5rem auto", fontFamily: "ui-sans-serif" }, children: [_jsx("h1", { style: { fontSize: 28, fontWeight: 700 }, children: "One Saavi" }), _jsxs("p", { style: { opacity: 0.8 }, children: ["Status: ", status, fileName ? ` • ${fileName}` : "", dirty ? " • Dirty" : ""] }), _jsxs("div", { className: "topbar", style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }, children: [db && (_jsx("button", { className: "mobile-only", onClick: () => setDrawerOpen(true), "aria-label": "Open groups", children: "\u2630 Groups" })), _jsx("button", { onClick: doOpen, children: "Open .kdbx" }), _jsx("button", { onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" }), !hasFilePicker() && (_jsxs(_Fragment, { children: [_jsxs("label", { style: { border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }, children: [_jsx("input", { type: "file", accept: ".kdbx", style: { display: "none" }, onChange: async (e) => {
                                             const file = e.target.files?.[0];
                                             if (file)
                                                 await handleMobileFile(file);
-                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("button", { className: "mobile-only", onClick: () => setDrawerOpen(false), style: { marginBottom: 8 }, children: "\u2715 Close" }), _jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => setOpenedEntryId(id) }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => setOpenedEntryId(null), onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock })] }));
+                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock })] }));
 }
