@@ -7,6 +7,7 @@ import GroupTree, { GroupNode } from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
 import { setupPWAInstall, triggerInstall } from "./pwa/install";
+import { isIOS, isStandaloneIOS } from "./pwa/ios";
 import "./app.css";
 
 // ---------- helpers ----------
@@ -47,6 +48,9 @@ export default function App() {
   useEffect(() => {
     setupPWAInstall(setCanInstall);
   }, []);
+
+  // iOS helper modal
+  const [showIOSHelp, setShowIOSHelp] = useState(false);
 
   // ----- Auto-lock helpers -----
   function clearIdleTimer() {
@@ -330,7 +334,7 @@ export default function App() {
           />
         )}
 
-        {/* PWA Install button */}
+        {/* PWA Install: Android/Desktop via beforeinstallprompt */}
         {canInstall && (
           <button
             onClick={async () => {
@@ -341,6 +345,13 @@ export default function App() {
             title="Install this app"
           >
             Install app
+          </button>
+        )}
+
+        {/* iOS helper: show instructions if not standalone and no beforeinstallprompt */}
+        {!canInstall && isIOS() && !isStandaloneIOS() && (
+          <button onClick={() => setShowIOSHelp(true)} title="Add to Home Screen on iOS">
+            Install on iOS
           </button>
         )}
       </div>
@@ -386,6 +397,41 @@ export default function App() {
         onCancel={() => { setUnlockOpen(false); setPendingBytes(null); }}
         onUnlock={handleUnlock}
       />
+
+      {/* iOS install helper modal */}
+      {showIOSHelp && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.4)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 100
+          }}
+          onClick={() => setShowIOSHelp(false)}
+        >
+          <div
+            style={{ background: "#fff", padding: 16, borderRadius: 8, maxWidth: 420 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0 }}>Install on iOS</h3>
+            <ol style={{ lineHeight: 1.6 }}>
+              <li>Open this site in <strong>Safari</strong>.</li>
+              <li>Tap the <strong>Share</strong> icon (square with an up arrow).</li>
+              <li>Scroll and tap <strong>Add to Home Screen</strong>.</li>
+              <li>Tap <strong>Add</strong>. Launch from the new home screen icon.</li>
+            </ol>
+            <p style={{ fontSize: 14, opacity: .8, marginTop: 8 }}>
+              Tip: On iOS, Chrome/Edge also rely on Safari’s engine and don’t show a native install prompt.
+              Use Safari for Add to Home Screen.
+            </p>
+            <div style={{ textAlign: "right" }}>
+              <button onClick={() => setShowIOSHelp(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
