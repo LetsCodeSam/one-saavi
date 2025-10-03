@@ -6,7 +6,8 @@ import EntryView from "./ui/EntryView";
 import GroupTree, { GroupNode } from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
-import "./app.css";   // responsive/mobile styles
+import { setupPWAInstall, triggerInstall } from "./pwa/install";
+import "./app.css";
 
 // ---------- helpers ----------
 function unwrap(val: any): string {
@@ -27,32 +28,33 @@ export default function App() {
   const [fileName, setFileName] = useState("");
   const [dirty, setDirty] = useState(false);
 
-  // selection
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [openedEntryId, setOpenedEntryId] = useState<string | null>(null);
 
-  // unlock dialog plumbing
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
 
-  // search query
   const [q, setQ] = useState("");
-
-  // mobile drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // ---- Auto-lock timer ----
-  const [autoLockMins, setAutoLockMins] = useState<number>(5); // default 5 minutes
+  // ---- Auto-lock state ----
+  const [autoLockMins, setAutoLockMins] = useState<number>(5);
   const idleTimer = useRef<number | null>(null);
   const lastVisibleAt = useRef<number>(Date.now());
 
+  // ---- PWA install state ----
+  const [canInstall, setCanInstall] = useState(false);
+  useEffect(() => {
+    setupPWAInstall(setCanInstall);
+  }, []);
+
+  // ----- Auto-lock helpers -----
   function clearIdleTimer() {
     if (idleTimer.current != null) {
       window.clearTimeout(idleTimer.current);
       idleTimer.current = null;
     }
   }
-
   function scheduleIdleTimer() {
     clearIdleTimer();
     if (!db || autoLockMins <= 0) return;
@@ -60,19 +62,15 @@ export default function App() {
       lockNow("Auto-locked after inactivity");
     }, autoLockMins * 60_000);
   }
-
   function noteActivity() {
-    // Any user activity resets the timer if a DB is open
     if (!db) return;
     scheduleIdleTimer();
   }
-
   function onVisibilityChange() {
     if (document.visibilityState === "visible") {
-      // If we were hidden longer than timeout, lock immediately
       const hiddenForMs = Date.now() - lastVisibleAt.current;
       if (hiddenForMs >= autoLockMins * 60_000 && db) {
-        lockNow("Auto-locked while tab was hidden");
+        lockNow("Auto-locked while tab hidden");
       } else {
         scheduleIdleTimer();
       }
@@ -80,9 +78,7 @@ export default function App() {
       lastVisibleAt.current = Date.now();
     }
   }
-
   function lockNow(reason = "Locked") {
-    // Do not save automatically; just forget decrypted DB
     if (!db) return;
     setDb(null);
     setSelectedGroupId(null);
@@ -93,22 +89,18 @@ export default function App() {
     setDrawerOpen(false);
     clearIdleTimer();
     setStatus(reason);
-    // Optional: wipe clipboard once on lock (best-effort)
     try {
       navigator.clipboard.writeText(" ");
       navigator.clipboard.writeText("");
     } catch {}
   }
-
-  // Hook up global activity listeners
   useEffect(() => {
     const act = () => noteActivity();
     window.addEventListener("pointerdown", act, { passive: true });
     window.addEventListener("keydown", act);
     window.addEventListener("touchstart", act, { passive: true });
-    window.addEventListener("mousemove", act, { passive: true });
+    window.addEventListener("mousemove", act);
     document.addEventListener("visibilitychange", onVisibilityChange);
-
     return () => {
       window.removeEventListener("pointerdown", act);
       window.removeEventListener("keydown", act);
@@ -116,17 +108,10 @@ export default function App() {
       window.removeEventListener("mousemove", act);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, autoLockMins]);
+  useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
 
-  // Reschedule when autolock setting changes or when db opens/closes
-  useEffect(() => {
-    if (db) scheduleIdleTimer();
-    else clearIdleTimer();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, autoLockMins]);
-
-  // ----- OPEN (desktop) -----
+  // ----- OPEN / SAVE -----
   async function doOpen() {
     try {
       const h = await pickKdbx();
@@ -134,7 +119,6 @@ export default function App() {
       const f = await h.getFile();
       setFileName(f.name);
       setHandle(h);
-
       const bytes = await readBytes(h);
       setPendingBytes(bytes);
       setUnlockOpen(true);
@@ -142,8 +126,6 @@ export default function App() {
       setStatus(e?.message || "Open failed");
     }
   }
-
-  // ----- SAVE (desktop) -----
   async function doSave() {
     if (!db || !handle) return;
     try {
@@ -155,8 +137,6 @@ export default function App() {
       setStatus(e?.message || "Save failed");
     }
   }
-
-  // ----- MOBILE fallback -----
   async function handleMobileFile(file: File) {
     setFileName(file.name);
     setHandle(null);
@@ -164,7 +144,6 @@ export default function App() {
     setPendingBytes(bytes);
     setUnlockOpen(true);
   }
-
   async function saveAsDownload() {
     if (!db) return;
     try {
@@ -192,13 +171,10 @@ export default function App() {
       setSelectedGroupId(null);
       setOpenedEntryId(null);
       setStatus(handle ? "Opened" : "Opened (mobile)");
-
       if (!hasFilePicker()) {
         await saveVaultBytes(pendingBytes, fileName || "vault.kdbx");
       }
       setUnlockOpen(false);
-
-      // start idle timer after a successful unlock
       scheduleIdleTimer();
     } catch (e: any) {
       setStatus(e?.message || "Unlock failed");
@@ -216,11 +192,9 @@ export default function App() {
       g.groups?.forEach((x: any) => { if (!found) search(x); });
     }
     db.groups?.forEach((g: any) => search(g));
-    const fallback = db.getDefaultGroup?.() ?? db.groups?.[0] ?? null;
-    return found || fallback;
+    return found || db.getDefaultGroup?.() || db.groups?.[0] || null;
   }, [db]);
 
-  // ----- GROUP TREE -----
   const groupTree: GroupNode | null = useMemo(() => {
     if (!rootGroup) return null;
     function build(g: any): GroupNode {
@@ -251,18 +225,14 @@ export default function App() {
       (g.groups || []).forEach(collectAll);
     }
     function collectFromId(g: any, id: string): boolean {
-      const hit = g.uuid?.id === id;
-      if (hit) { collectAll(g); return true; }
+      if (g.uuid?.id === id) { collectAll(g); return true; }
       return (g.groups || []).some((x: any) => collectFromId(x, id));
     }
-
     if (!selectedGroupId) collectAll(rootGroup);
     else collectFromId(rootGroup, selectedGroupId);
-
     return out;
   }, [db, rootGroup, selectedGroupId]);
 
-  // ----- FILTERED entries -----
   const filteredEntries = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return entries;
@@ -293,7 +263,7 @@ export default function App() {
       try { await navigator.clipboard.writeText(""); } catch {}
       setStatus("Clipboard cleared");
     }, ms);
-    noteActivity(); // copying counts as activity
+    noteActivity();
   }
   function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
 
@@ -305,7 +275,6 @@ export default function App() {
         Status: {status}{fileName ? ` • ${fileName}` : ""}{dirty ? " • Dirty" : ""}
       </p>
 
-      {/* sticky topbar with buttons and search */}
       <div className="topbar" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {db && (
           <button className="mobile-only" onClick={() => setDrawerOpen(true)} aria-label="Open groups">
@@ -334,16 +303,12 @@ export default function App() {
           </>
         )}
 
-        {/* Auto-lock controls */}
         {db && (
           <>
             <button onClick={() => lockNow("Locked manually")}>Lock now</button>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span>Auto-lock (mins)</span>
-              <select
-                value={autoLockMins}
-                onChange={(e) => setAutoLockMins(Number(e.target.value))}
-              >
+              <select value={autoLockMins} onChange={(e) => setAutoLockMins(Number(e.target.value))}>
                 <option value={1}>1</option>
                 <option value={3}>3</option>
                 <option value={5}>5</option>
@@ -364,13 +329,25 @@ export default function App() {
             style={{ padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 }}
           />
         )}
+
+        {/* PWA Install button */}
+        {canInstall && (
+          <button
+            onClick={async () => {
+              const res = await triggerInstall();
+              if (res === "accepted") setStatus("App installed");
+              else if (res === "dismissed") setStatus("Install dismissed");
+            }}
+            title="Install this app"
+          >
+            Install app
+          </button>
+        )}
       </div>
 
       {db && (
         <div className="app-grid">
-          {/* Drawer backdrop */}
           {drawerOpen && <div className="drawer-backdrop mobile-only" onClick={() => setDrawerOpen(false)} />}
-
           <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
             <h3>Groups</h3>
             <GroupTree
@@ -390,7 +367,6 @@ export default function App() {
                 onOpen={(id) => { setOpenedEntryId(id); noteActivity(); }}
               />
             </div>
-
             {selectedEntry && (
               <div style={{ marginTop: 20 }}>
                 <EntryView

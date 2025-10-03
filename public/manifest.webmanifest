@@ -1,0 +1,15 @@
+{
+  "name": "One Saavi",
+  "short_name": "Saavi",
+  "description": "Web KeePass client (KDBX) with local & OneDrive support",
+  "start_url": "/one-saavi/",
+  "scope": "/one-saavi/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#111827",
+  "icons": [
+    { "src": "/one-saavi/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/one-saavi/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/one-saavi/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

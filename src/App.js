@@ -7,7 +7,8 @@ import EntryView from "./ui/EntryView";
 import GroupTree from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
-import "./app.css"; // responsive/mobile styles
+import { setupPWAInstall, triggerInstall } from "./pwa/install";
+import "./app.css";
 // ---------- helpers ----------
 function unwrap(val) {
     if (!val)
@@ -26,20 +27,22 @@ export default function App() {
     const [status, setStatus] = useState("Ready");
     const [fileName, setFileName] = useState("");
     const [dirty, setDirty] = useState(false);
-    // selection
     const [selectedGroupId, setSelectedGroupId] = useState(null);
     const [openedEntryId, setOpenedEntryId] = useState(null);
-    // unlock dialog plumbing
     const [unlockOpen, setUnlockOpen] = useState(false);
     const [pendingBytes, setPendingBytes] = useState(null);
-    // search query
     const [q, setQ] = useState("");
-    // mobile drawer state
     const [drawerOpen, setDrawerOpen] = useState(false);
-    // ---- Auto-lock timer ----
-    const [autoLockMins, setAutoLockMins] = useState(5); // default 5 minutes
+    // ---- Auto-lock state ----
+    const [autoLockMins, setAutoLockMins] = useState(5);
     const idleTimer = useRef(null);
     const lastVisibleAt = useRef(Date.now());
+    // ---- PWA install state ----
+    const [canInstall, setCanInstall] = useState(false);
+    useEffect(() => {
+        setupPWAInstall(setCanInstall);
+    }, []);
+    // ----- Auto-lock helpers -----
     function clearIdleTimer() {
         if (idleTimer.current != null) {
             window.clearTimeout(idleTimer.current);
@@ -55,17 +58,15 @@ export default function App() {
         }, autoLockMins * 60000);
     }
     function noteActivity() {
-        // Any user activity resets the timer if a DB is open
         if (!db)
             return;
         scheduleIdleTimer();
     }
     function onVisibilityChange() {
         if (document.visibilityState === "visible") {
-            // If we were hidden longer than timeout, lock immediately
             const hiddenForMs = Date.now() - lastVisibleAt.current;
             if (hiddenForMs >= autoLockMins * 60000 && db) {
-                lockNow("Auto-locked while tab was hidden");
+                lockNow("Auto-locked while tab hidden");
             }
             else {
                 scheduleIdleTimer();
@@ -76,7 +77,6 @@ export default function App() {
         }
     }
     function lockNow(reason = "Locked") {
-        // Do not save automatically; just forget decrypted DB
         if (!db)
             return;
         setDb(null);
@@ -88,20 +88,18 @@ export default function App() {
         setDrawerOpen(false);
         clearIdleTimer();
         setStatus(reason);
-        // Optional: wipe clipboard once on lock (best-effort)
         try {
             navigator.clipboard.writeText(" ");
             navigator.clipboard.writeText("");
         }
         catch { }
     }
-    // Hook up global activity listeners
     useEffect(() => {
         const act = () => noteActivity();
         window.addEventListener("pointerdown", act, { passive: true });
         window.addEventListener("keydown", act);
         window.addEventListener("touchstart", act, { passive: true });
-        window.addEventListener("mousemove", act, { passive: true });
+        window.addEventListener("mousemove", act);
         document.addEventListener("visibilitychange", onVisibilityChange);
         return () => {
             window.removeEventListener("pointerdown", act);
@@ -110,17 +108,9 @@ export default function App() {
             window.removeEventListener("mousemove", act);
             document.removeEventListener("visibilitychange", onVisibilityChange);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [db, autoLockMins]);
-    // Reschedule when autolock setting changes or when db opens/closes
-    useEffect(() => {
-        if (db)
-            scheduleIdleTimer();
-        else
-            clearIdleTimer();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [db, autoLockMins]);
-    // ----- OPEN (desktop) -----
+    useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
+    // ----- OPEN / SAVE -----
     async function doOpen() {
         try {
             const h = await pickKdbx();
@@ -136,7 +126,6 @@ export default function App() {
             setStatus(e?.message || "Open failed");
         }
     }
-    // ----- SAVE (desktop) -----
     async function doSave() {
         if (!db || !handle)
             return;
@@ -150,7 +139,6 @@ export default function App() {
             setStatus(e?.message || "Save failed");
         }
     }
-    // ----- MOBILE fallback -----
     async function handleMobileFile(file) {
         setFileName(file.name);
         setHandle(null);
@@ -191,7 +179,6 @@ export default function App() {
                 await saveVaultBytes(pendingBytes, fileName || "vault.kdbx");
             }
             setUnlockOpen(false);
-            // start idle timer after a successful unlock
             scheduleIdleTimer();
         }
         catch (e) {
@@ -215,10 +202,8 @@ export default function App() {
                 search(x); });
         }
         db.groups?.forEach((g) => search(g));
-        const fallback = db.getDefaultGroup?.() ?? db.groups?.[0] ?? null;
-        return found || fallback;
+        return found || db.getDefaultGroup?.() || db.groups?.[0] || null;
     }, [db]);
-    // ----- GROUP TREE -----
     const groupTree = useMemo(() => {
         if (!rootGroup)
             return null;
@@ -250,8 +235,7 @@ export default function App() {
             (g.groups || []).forEach(collectAll);
         }
         function collectFromId(g, id) {
-            const hit = g.uuid?.id === id;
-            if (hit) {
+            if (g.uuid?.id === id) {
                 collectAll(g);
                 return true;
             }
@@ -263,7 +247,6 @@ export default function App() {
             collectFromId(rootGroup, selectedGroupId);
         return out;
     }, [db, rootGroup, selectedGroupId]);
-    // ----- FILTERED entries -----
     const filteredEntries = useMemo(() => {
         const s = q.trim().toLowerCase();
         if (!s)
@@ -293,7 +276,7 @@ export default function App() {
             catch { }
             setStatus("Clipboard cleared");
         }, ms);
-        noteActivity(); // copying counts as activity
+        noteActivity();
     }
     function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
     // ---------- UI ----------
@@ -301,5 +284,11 @@ export default function App() {
                                             const file = e.target.files?.[0];
                                             if (file)
                                                 await handleMobileFile(file);
-                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock })] }));
+                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } })), canInstall && (_jsx("button", { onClick: async () => {
+                            const res = await triggerInstall();
+                            if (res === "accepted")
+                                setStatus("App installed");
+                            else if (res === "dismissed")
+                                setStatus("Install dismissed");
+                        }, title: "Install this app", children: "Install app" }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock })] }));
 }
