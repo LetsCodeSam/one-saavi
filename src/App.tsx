@@ -30,6 +30,7 @@ export default function App() {
   const [status, setStatus] = useState("Ready");
   const [fileName, setFileName] = useState("");
   const [dirty, setDirty] = useState(false);
+  const READ_ONLY = true; // toggle
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [openedEntryId, setOpenedEntryId] = useState<string | null>(null);
@@ -143,7 +144,7 @@ export default function App() {
     }
   }
   async function doSave() {
-    if (!db || !handle) return;
+    if (READ_ONLY || !db || !handle) return;
     try {
       const out = await saveKdbx(db);
       await writeBytes(handle, out);
@@ -300,7 +301,12 @@ export default function App() {
     noteActivity();
   }
 
-  function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
+  function markDirty() {
+  if (READ_ONLY) return; // do nothing in read-only
+  setDirty(true);
+  setStatus("Edited");
+  noteActivity();
+}
 
   /* --------- Reopen last / (optional) --------- */
 
