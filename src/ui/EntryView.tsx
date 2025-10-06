@@ -1,93 +1,118 @@
 import React, { useMemo, useState } from "react";
-import * as kdbxweb from "kdbxweb";
 
-type Props = {
-  entry: any;                 // kdbxweb entry
-  onChange: () => void;       // call when edited (to mark dirty)
-  onClose?: () => void;
-  onCopy?: (t: string) => Promise<void>;
-};
-
-function unwrap(v: any): string {
-  if (!v) return "";
-  return v.getText ? v.getText() : String(v);
+function unwrap(val: any): string {
+  if (!val) return "";
+  return val.getText ? val.getText() : String(val);
 }
-function getField(en: any, key: string): string {
-  const v = en?.fields?.get ? en.fields.get(key) : en?.fields?.[key];
+function getField(entry: any, key: string): string {
+  const v = entry?.fields?.get ? entry.fields.get(key) : entry?.fields?.[key];
   return unwrap(v);
 }
-function setField(en: any, key: string, val: string) {
-  if (key === "Password") {
-    en.fields.set("Password", kdbxweb.ProtectedValue.fromString(val ?? ""));
-  } else {
-    en.fields.set(key, val ?? "");
-  }
-  en.times.update();
-}
+
+type Props = {
+  entry: any;
+  onChange: () => void;
+  onClose: () => void;
+  onCopy: (text: string) => void;
+};
 
 export default function EntryView({ entry, onChange, onClose, onCopy }: Props) {
   const [reveal, setReveal] = useState(false);
 
-  const model = useMemo(
-    () => ({
-      Title: getField(entry, "Title"),
-      UserName: getField(entry, "UserName"),
-      URL: getField(entry, "URL"),
-      Password: getField(entry, "Password"),
-      Notes: getField(entry, "Notes"),
-    }),
-    [entry]
-  );
+  const title = useMemo(() => getField(entry, "Title"), [entry]);
+  const user = useMemo(() => getField(entry, "UserName"), [entry]);
+  const url = useMemo(() => getField(entry, "URL"), [entry]);
+  const notes = useMemo(() => getField(entry, "Notes"), [entry]);
+
+  function setField(key: string, val: string) {
+    if (entry?.fields?.set) entry.fields.set(key, val);
+    onChange();
+  }
+
+  function getPassword(): string {
+    const v = entry?.fields?.get ? entry.fields.get("Password") : entry?.fields?.Password;
+    return unwrap(v);
+  }
 
   return (
-    <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 8 }}>
+    <form
+      autoComplete="off"
+      onSubmit={(e) => e.preventDefault()}
+      style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <strong>Edit entry</strong>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setReveal((v) => !v)}>{reveal ? "Hide" : "Show"}</button>
-          {onClose && <button onClick={onClose}>Close</button>}
-        </div>
+        <h3 style={{ margin: 0 }}>{title || "(no title)"}</h3>
+        <button type="button" onClick={onClose}>Close</button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "140px 1fr auto", gap: 8, marginTop: 12 }}>
-        <label style={{ alignSelf: "center" }}>Title</label>
-        <input
-          defaultValue={model.Title}
-          onChange={(e) => { setField(entry, "Title", e.target.value); onChange(); }}
-        />
-        <span />
+      <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        <label>
+          <div>Title</div>
+          <input
+            name="ev-title"
+            autoComplete="off"
+            value={title}
+            onChange={(e) => setField("Title", e.target.value)}
+          />
+        </label>
 
-        <label style={{ alignSelf: "center" }}>Username</label>
-        <input
-          defaultValue={model.UserName}
-          onChange={(e) => { setField(entry, "UserName", e.target.value); onChange(); }}
-        />
-        <button onClick={() => onCopy?.(getField(entry, "UserName"))}>User</button>
+        <label>
+          <div>User name</div>
+          <input
+            name="ev-user"            /* avoid 'username' */
+            autoComplete="off"
+            value={user}
+            onChange={(e) => setField("UserName", e.target.value)}
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+          />
+        </label>
 
-        <label style={{ alignSelf: "center" }}>URL</label>
-        <input
-          defaultValue={model.URL}
-          onChange={(e) => { setField(entry, "URL", e.target.value); onChange(); }}
-        />
-        <a href={model.URL || "#"} target="_blank" rel="noreferrer">Open</a>
+        <label>
+          <div>URL</div>
+          <input
+            name="ev-url"
+            autoComplete="off"
+            value={url}
+            onChange={(e) => setField("URL", e.target.value)}
+          />
+        </label>
 
-        <label style={{ alignSelf: "center" }}>Password</label>
-        <input
-          type={reveal ? "text" : "password"}
-          defaultValue={model.Password}
-          onChange={(e) => { setField(entry, "Password", e.target.value); onChange(); }}
-        />
-        <button onClick={() => onCopy?.(getField(entry, "Password"))}>Pass</button>
+        <label>
+          <div>Password</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              name="ev-pass"          /* avoid 'password' */
+              type={reveal ? "text" : "password"}
+              autoComplete="new-password"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              value={getPassword()}
+              onChange={(e) => setField("Password", e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button type="button" onClick={() => setReveal((v) => !v)}>
+              {reveal ? "Hide" : "Show"}
+            </button>
+            <button type="button" onClick={() => onCopy(getPassword())}>
+              Copy
+            </button>
+          </div>
+        </label>
 
-        <label style={{ alignSelf: "start", marginTop: 6 }}>Notes</label>
-        <textarea
-          defaultValue={model.Notes}
-          onChange={(e) => { setField(entry, "Notes", e.target.value); onChange(); }}
-          rows={6}
-          style={{ resize: "vertical" }}
-        />
-        <span />
+        <label>
+          <div>Notes</div>
+          <textarea
+            name="ev-notes"
+            autoComplete="off"
+            value={notes}
+            onChange={(e) => setField("Notes", e.target.value)}
+            rows={4}
+          />
+        </label>
       </div>
-    </div>
+    </form>
   );
 }

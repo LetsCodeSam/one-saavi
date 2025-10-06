@@ -1,19 +1,17 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
-import { openKdbx, saveKdbx } from "./crypto/keepass";
+import { openKdbx, saveKdbx, addNewEntry, createNewDb } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
 import EntryView from "./ui/EntryView";
 import GroupTree from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
-import { saveVaultBytes } from "./fs/mobileStore";
+import { saveVaultBytes, loadVaultBytes } from "./fs/mobileStore";
 import { setupPWAInstall, triggerInstall } from "./pwa/install";
 import { isIOS, isStandaloneIOS } from "./pwa/ios";
+import { rememberHandle, getRememberedHandle } from "./fs/recents";
 import "./app.css";
-import { addNewEntry } from "./crypto/keepass";
-import { rememberHandle } from "./fs/recents";
-import { createNewDb } from "./crypto/keepass";
-// ---------- helpers ----------
+/* ---------------- helpers ---------------- */
 function unwrap(val) {
     if (!val)
         return "";
@@ -24,7 +22,7 @@ function field(en, key) {
     return unwrap(v);
 }
 const hasFilePicker = () => "showOpenFilePicker" in window;
-// ---------- component ----------
+/* ---------------- component ---------------- */
 export default function App() {
     const [db, setDb] = useState(null);
     const [handle, setHandle] = useState(null);
@@ -37,61 +35,18 @@ export default function App() {
     const [pendingBytes, setPendingBytes] = useState(null);
     const [q, setQ] = useState("");
     const [drawerOpen, setDrawerOpen] = useState(false);
-    const clipboardTicker = useRef(null);
-    // ---- Auto-lock state ----
+    /* ---- Auto-lock ---- */
     const [autoLockMins, setAutoLockMins] = useState(5);
     const idleTimer = useRef(null);
     const lastVisibleAt = useRef(Date.now());
-    // ---- PWA install state ----
+    /* ---- Clipboard countdown ticker ---- */
+    const clipboardTicker = useRef(null);
+    /* ---- PWA install ---- */
     const [canInstall, setCanInstall] = useState(false);
-    useEffect(() => {
-        setupPWAInstall(setCanInstall);
-    }, []);
-    // New Database
-    async function createNewVault() {
-        try {
-            const pw = window.prompt("Set a master password for the new vault:");
-            if (!pw)
-                return;
-            const newDb = await createNewDb(pw, "Saavi");
-            setDb(newDb);
-            setDirty(true);
-            setSelectedGroupId(null);
-            setOpenedEntryId(null);
-            if (hasFilePicker()) {
-                // Let user choose where to save it
-                const h = await window.showSaveFilePicker({
-                    suggestedName: "new-vault.kdbx",
-                    types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
-                });
-                await ensurePerm(h, "readwrite");
-                const out = await saveKdbx(newDb);
-                await writeBytes(h, out);
-                setHandle(h);
-                setFileName("new-vault.kdbx");
-                setDirty(false);
-                await rememberHandle(h);
-                setStatus("New vault created");
-            }
-            else {
-                // Mobile: download new file
-                const out = await saveKdbx(newDb);
-                const a = document.createElement("a");
-                a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
-                a.download = "new-vault.kdbx";
-                a.click();
-                URL.revokeObjectURL(a.href);
-                setDirty(false);
-                setStatus("New vault created (downloaded)");
-            }
-        }
-        catch (e) {
-            setStatus(e?.message || "Create failed");
-        }
-    }
-    // iOS helper modal
+    useEffect(() => { setupPWAInstall(setCanInstall); }, []);
+    /* ---- iOS helper modal ---- */
     const [showIOSHelp, setShowIOSHelp] = useState(false);
-    // ----- Auto-lock helpers -----
+    /* --------- Auto-lock helpers --------- */
     function clearIdleTimer() {
         if (idleTimer.current != null) {
             window.clearTimeout(idleTimer.current);
@@ -125,6 +80,12 @@ export default function App() {
             lastVisibleAt.current = Date.now();
         }
     }
+    function stopClipboardTicker() {
+        if (clipboardTicker.current != null) {
+            clearInterval(clipboardTicker.current);
+            clipboardTicker.current = null;
+        }
+    }
     function lockNow(reason = "Locked") {
         if (!db)
             return;
@@ -136,6 +97,7 @@ export default function App() {
         setUnlockOpen(false);
         setDrawerOpen(false);
         clearIdleTimer();
+        stopClipboardTicker();
         setStatus(reason);
         try {
             navigator.clipboard.writeText(" ");
@@ -143,18 +105,6 @@ export default function App() {
         }
         catch { }
     }
-    if (clipboardTicker.current != null) {
-        clearInterval(clipboardTicker.current);
-        clipboardTicker.current = null;
-    }
-    useEffect(() => {
-        return () => {
-            if (clipboardTicker.current != null) {
-                clearInterval(clipboardTicker.current);
-                clipboardTicker.current = null;
-            }
-        };
-    }, []);
     useEffect(() => {
         const act = () => noteActivity();
         window.addEventListener("pointerdown", act, { passive: true });
@@ -171,34 +121,8 @@ export default function App() {
         };
     }, [db, autoLockMins]);
     useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
-    // ---- NEW DATABASE
-    _jsx("button", { onClick: createNewVault, title: "Create a new KDBX vault", children: "New vault" });
-    // ----- NEW ENTRY -----
-    async function handleNewEntry() {
-        if (!db)
-            return;
-        // pick group: selected or root
-        const groupRef = (function findGroupById(g, id) {
-            if (!id)
-                return rootGroup;
-            if (g.uuid?.id === id)
-                return g;
-            for (const x of g.groups || []) {
-                const hit = findGroupById(x, id);
-                if (hit)
-                    return hit;
-            }
-            return rootGroup;
-        })(rootGroup, selectedGroupId);
-        const en = addNewEntry(db, groupRef, { title: "New Entry" });
-        setDirty(true);
-        // open it for editing
-        setOpenedEntryId(en.uuid.id);
-        setStatus("New entry created (unsaved)");
-        noteActivity?.();
-    }
-    // -- REOPEN LAST DATABSE
-    // ----- OPEN / SAVE -----
+    useEffect(() => () => stopClipboardTicker(), []);
+    /* --------- OPEN / SAVE --------- */
     async function doOpen() {
         try {
             const h = await pickKdbx();
@@ -252,7 +176,7 @@ export default function App() {
             setStatus(e?.message || "Save failed");
         }
     }
-    // ----- UNLOCK -----
+    /* --------- UNLOCK --------- */
     async function handleUnlock(password, keyFile) {
         if (!pendingBytes)
             return;
@@ -277,7 +201,7 @@ export default function App() {
             setPendingBytes(null);
         }
     }
-    // ----- ROOT GROUP -----
+    /* --------- ROOT GROUP / TREE --------- */
     const rootGroup = useMemo(() => {
         if (!db)
             return null;
@@ -306,7 +230,7 @@ export default function App() {
         }
         return build(rootGroup);
     }, [rootGroup]);
-    // ----- ENTRIES -----
+    /* --------- ENTRIES / FILTER --------- */
     const entries = useMemo(() => {
         if (!db || !rootGroup)
             return [];
@@ -345,7 +269,7 @@ export default function App() {
             (e.url || "").toLowerCase().includes(s));
     }, [entries, q]);
     const selectedEntry = useMemo(() => entries.find((e) => e.uuid === openedEntryId)?._ref, [entries, openedEntryId]);
-    // ----- actions -----
+    /* --------- actions --------- */
     async function revealPassword(entryUuid) {
         const item = entries.find((e) => e.uuid === entryUuid);
         if (!item)
@@ -356,11 +280,8 @@ export default function App() {
     async function copyAndClear(text, ms = 15000) {
         if (!text)
             return;
-        // stop any previous ticker
-        if (clipboardTicker.current != null) {
-            clearInterval(clipboardTicker.current);
-            clipboardTicker.current = null;
-        }
+        // Stop previous countdown if any
+        stopClipboardTicker();
         await navigator.clipboard.writeText(text);
         let secs = Math.max(1, Math.round(ms / 1000));
         setStatus(`Copied (clears in ${secs}s)`);
@@ -370,11 +291,7 @@ export default function App() {
                 setStatus(`Copied (clears in ${secs}s)`);
             }
             else {
-                if (clipboardTicker.current != null) {
-                    clearInterval(clipboardTicker.current);
-                    clipboardTicker.current = null;
-                }
-                // best-effort wipe
+                stopClipboardTicker();
                 try {
                     navigator.clipboard.writeText(" ");
                     navigator.clipboard.writeText("");
@@ -383,14 +300,108 @@ export default function App() {
                 setStatus("Clipboard cleared");
             }
         }, 1000);
+        noteActivity();
     }
     function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
-    // ---------- UI ----------
-    return (_jsxs("div", { style: { maxWidth: 1100, margin: "1.5rem auto", fontFamily: "ui-sans-serif" }, children: [_jsx("h1", { style: { fontSize: 28, fontWeight: 700 }, children: "One Saavi" }), _jsxs("p", { style: { opacity: 0.8 }, children: ["Status: ", status, fileName ? ` • ${fileName}` : "", dirty ? " • Dirty" : ""] }), _jsxs("div", { className: "topbar", style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }, children: [db && (_jsx("button", { className: "mobile-only", onClick: () => setDrawerOpen(true), "aria-label": "Open groups", children: "\u2630 Groups" })), _jsx("button", { onClick: doOpen, children: "Open .kdbx" }), _jsx("button", { onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" }), !hasFilePicker() && (_jsxs(_Fragment, { children: [_jsxs("label", { style: { border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }, children: [_jsx("input", { type: "file", accept: ".kdbx", style: { display: "none" }, onChange: async (e) => {
+    /* --------- New entry / Reopen last / New vault (optional) --------- */
+    async function handleNewEntry() {
+        if (!db || !rootGroup)
+            return;
+        function findGroupById(g, id) {
+            if (!id)
+                return g;
+            if (g.uuid?.id === id)
+                return g;
+            for (const child of g.groups || []) {
+                const hit = findGroupById(child, id);
+                if (hit)
+                    return hit;
+            }
+            return g;
+        }
+        const groupRef = findGroupById(rootGroup, selectedGroupId);
+        const en = addNewEntry(db, groupRef, { title: "New Entry" });
+        setDirty(true);
+        setOpenedEntryId(en.uuid.id);
+        setStatus("New entry created (unsaved)");
+        noteActivity();
+    }
+    async function reopenLast() {
+        try {
+            if (hasFilePicker()) {
+                const h = await getRememberedHandle();
+                if (h) {
+                    await ensurePerm(h, "readwrite");
+                    const f = await h.getFile();
+                    setFileName(f.name);
+                    setHandle(h);
+                    const bytes = await readBytes(h);
+                    setPendingBytes(bytes);
+                    setUnlockOpen(true);
+                    setStatus("Ready to unlock last file");
+                    return;
+                }
+            }
+            const rec = await loadVaultBytes();
+            if (rec) {
+                setFileName(rec.name);
+                setHandle(null);
+                setPendingBytes;
+                setUnlockOpen(true);
+                setStatus("Ready to unlock cached mobile vault");
+                return;
+            }
+            setStatus("No previous vault remembered");
+        }
+        catch (e) {
+            setStatus(e?.message || "Reopen failed");
+        }
+    }
+    async function createNewVault() {
+        try {
+            const pw = window.prompt("Set a master password for the new vault:");
+            if (!pw)
+                return;
+            const newDb = await createNewDb(pw, "Saavi");
+            setDb(newDb);
+            setDirty(true);
+            setSelectedGroupId(null);
+            setOpenedEntryId(null);
+            if (hasFilePicker()) {
+                const h = await window.showSaveFilePicker({
+                    suggestedName: "new-vault.kdbx",
+                    types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
+                });
+                await ensurePerm(h, "readwrite");
+                const out = await saveKdbx(newDb);
+                await writeBytes(h, out);
+                setHandle(h);
+                setFileName("new-vault.kdbx");
+                setDirty(false);
+                await rememberHandle(h);
+                setStatus("New vault created");
+            }
+            else {
+                const out = await saveKdbx(newDb);
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+                a.download = "new-vault.kdbx";
+                a.click();
+                URL.revokeObjectURL(a.href);
+                setDirty(false);
+                setStatus("New vault created (downloaded)");
+            }
+        }
+        catch (e) {
+            setStatus(e?.message || "Create failed");
+        }
+    }
+    /* ---------------- UI ---------------- */
+    return (_jsxs("div", { style: { maxWidth: 1100, margin: "1.5rem auto", fontFamily: "ui-sans-serif" }, children: [_jsx("h1", { style: { fontSize: 28, fontWeight: 700 }, children: "One Saavi" }), _jsxs("p", { style: { opacity: 0.8 }, children: ["Status: ", status, fileName ? ` • ${fileName}` : "", dirty ? " • Dirty" : ""] }), _jsxs("div", { className: "topbar", style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }, children: [db && (_jsx("button", { className: "mobile-only", onClick: () => setDrawerOpen(true), "aria-label": "Open groups", children: "\u2630 Groups" })), _jsx("button", { onClick: doOpen, children: "Open .kdbx" }), _jsx("button", { onClick: reopenLast, children: "Reopen last" }), _jsx("button", { onClick: createNewVault, children: "New vault" }), _jsx("button", { onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" }), !hasFilePicker() && (_jsxs(_Fragment, { children: [_jsxs("label", { style: { border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }, children: [_jsx("input", { type: "file", accept: ".kdbx", style: { display: "none" }, onChange: async (e) => {
                                             const file = e.target.files?.[0];
                                             if (file)
                                                 await handleMobileFile(file);
-                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } })), db && (_jsx("button", { onClick: handleNewEntry, title: "Create a new entry in the current group", children: "New" })), canInstall && (_jsx("button", { onClick: async () => {
+                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: handleNewEntry, children: "New" }), _jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } })), canInstall && (_jsx("button", { onClick: async () => {
                             const res = await triggerInstall();
                             if (res === "accepted")
                                 setStatus("App installed");
