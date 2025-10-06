@@ -10,7 +10,6 @@ import { setupPWAInstall, triggerInstall } from "./pwa/install";
 import { isIOS, isStandaloneIOS } from "./pwa/ios";
 import { rememberHandle, getRememberedHandle } from "./fs/recents";
 import "./app.css";
-import NewEntryDialog from "./ui/NewEntryDialog";
 
 
 /* ---------------- helpers ---------------- */
@@ -303,25 +302,7 @@ export default function App() {
 
   function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
 
-  /* --------- New entry / Reopen last / New vault (optional) --------- */
-  async function handleNewEntry() {
-    if (!db || !rootGroup) return;
-    function findGroupById(g: any, id: string | null): any {
-      if (!id) return g;
-      if (g.uuid?.id === id) return g;
-      for (const child of g.groups || []) {
-        const hit = findGroupById(child, id);
-        if (hit) return hit;
-      }
-      return g;
-    }
-    const groupRef = findGroupById(rootGroup, selectedGroupId);
-    const en = addNewEntry(db, groupRef, { title: "New Entry" });
-    setDirty(true);
-    setOpenedEntryId(en.uuid.id);
-    setStatus("New entry created (unsaved)");
-    noteActivity();
-  }
+  /* --------- Reopen last / (optional) --------- */
 
   async function reopenLast() {
     try {
@@ -354,43 +335,7 @@ export default function App() {
     }
   }
 
-  async function createNewVault() {
-    try {
-      const pw = window.prompt("Set a master password for the new vault:");
-      if (!pw) return;
-      const newDb = await createNewDb(pw, "Saavi");
-      setDb(newDb);
-      setDirty(true);
-      setSelectedGroupId(null);
-      setOpenedEntryId(null);
-
-      if (hasFilePicker()) {
-        const h = await (window as any).showSaveFilePicker({
-          suggestedName: "new-vault.kdbx",
-          types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
-        });
-        await ensurePerm(h, "readwrite");
-        const out = await saveKdbx(newDb);
-        await writeBytes(h, out);
-        setHandle(h);
-        setFileName("new-vault.kdbx");
-        setDirty(false);
-        await rememberHandle(h);
-        setStatus("New vault created");
-      } else {
-        const out = await saveKdbx(newDb);
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
-        a.download = "new-vault.kdbx";
-        a.click();
-        URL.revokeObjectURL(a.href);
-        setDirty(false);
-        setStatus("New vault created (downloaded)");
-      }
-    } catch (e: any) {
-      setStatus(e?.message || "Create failed");
-    }
-  }
+  
 
   /* ---------------- UI ---------------- */
   return (
@@ -409,8 +354,7 @@ export default function App() {
 
         <button onClick={doOpen}>Open .kdbx</button>
         <button onClick={reopenLast}>Reopen last</button>
-        <button onClick={createNewVault}>New vault</button>
-        <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
+                <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
 
         {!hasFilePicker() && (
           <>
@@ -432,7 +376,6 @@ export default function App() {
 
         {db && (
           <>
-            <button onClick={handleNewEntry}>New</button>
             <button onClick={() => lockNow("Locked manually")}>Lock now</button>
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span>Auto-lock (mins)</span>
