@@ -8,7 +8,11 @@ import GroupTree from "./ui/GroupTree";
 import UnlockDialog from "./ui/UnlockDialog";
 import { saveVaultBytes } from "./fs/mobileStore";
 import { setupPWAInstall, triggerInstall } from "./pwa/install";
+import { isIOS, isStandaloneIOS } from "./pwa/ios";
 import "./app.css";
+import { addNewEntry } from "./crypto/keepass";
+import { rememberHandle } from "./fs/recents";
+import { createNewDb } from "./crypto/keepass";
 // ---------- helpers ----------
 function unwrap(val) {
     if (!val)
@@ -33,6 +37,7 @@ export default function App() {
     const [pendingBytes, setPendingBytes] = useState(null);
     const [q, setQ] = useState("");
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const clipboardTicker = useRef(null);
     // ---- Auto-lock state ----
     const [autoLockMins, setAutoLockMins] = useState(5);
     const idleTimer = useRef(null);
@@ -42,6 +47,50 @@ export default function App() {
     useEffect(() => {
         setupPWAInstall(setCanInstall);
     }, []);
+    // New Database
+    async function createNewVault() {
+        try {
+            const pw = window.prompt("Set a master password for the new vault:");
+            if (!pw)
+                return;
+            const newDb = await createNewDb(pw, "Saavi");
+            setDb(newDb);
+            setDirty(true);
+            setSelectedGroupId(null);
+            setOpenedEntryId(null);
+            if (hasFilePicker()) {
+                // Let user choose where to save it
+                const h = await window.showSaveFilePicker({
+                    suggestedName: "new-vault.kdbx",
+                    types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
+                });
+                await ensurePerm(h, "readwrite");
+                const out = await saveKdbx(newDb);
+                await writeBytes(h, out);
+                setHandle(h);
+                setFileName("new-vault.kdbx");
+                setDirty(false);
+                await rememberHandle(h);
+                setStatus("New vault created");
+            }
+            else {
+                // Mobile: download new file
+                const out = await saveKdbx(newDb);
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+                a.download = "new-vault.kdbx";
+                a.click();
+                URL.revokeObjectURL(a.href);
+                setDirty(false);
+                setStatus("New vault created (downloaded)");
+            }
+        }
+        catch (e) {
+            setStatus(e?.message || "Create failed");
+        }
+    }
+    // iOS helper modal
+    const [showIOSHelp, setShowIOSHelp] = useState(false);
     // ----- Auto-lock helpers -----
     function clearIdleTimer() {
         if (idleTimer.current != null) {
@@ -94,6 +143,18 @@ export default function App() {
         }
         catch { }
     }
+    if (clipboardTicker.current != null) {
+        clearInterval(clipboardTicker.current);
+        clipboardTicker.current = null;
+    }
+    useEffect(() => {
+        return () => {
+            if (clipboardTicker.current != null) {
+                clearInterval(clipboardTicker.current);
+                clipboardTicker.current = null;
+            }
+        };
+    }, []);
     useEffect(() => {
         const act = () => noteActivity();
         window.addEventListener("pointerdown", act, { passive: true });
@@ -110,6 +171,33 @@ export default function App() {
         };
     }, [db, autoLockMins]);
     useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
+    // ---- NEW DATABASE
+    _jsx("button", { onClick: createNewVault, title: "Create a new KDBX vault", children: "New vault" });
+    // ----- NEW ENTRY -----
+    async function handleNewEntry() {
+        if (!db)
+            return;
+        // pick group: selected or root
+        const groupRef = (function findGroupById(g, id) {
+            if (!id)
+                return rootGroup;
+            if (g.uuid?.id === id)
+                return g;
+            for (const x of g.groups || []) {
+                const hit = findGroupById(x, id);
+                if (hit)
+                    return hit;
+            }
+            return rootGroup;
+        })(rootGroup, selectedGroupId);
+        const en = addNewEntry(db, groupRef, { title: "New Entry" });
+        setDirty(true);
+        // open it for editing
+        setOpenedEntryId(en.uuid.id);
+        setStatus("New entry created (unsaved)");
+        noteActivity?.();
+    }
+    // -- REOPEN LAST DATABSE
     // ----- OPEN / SAVE -----
     async function doOpen() {
         try {
@@ -118,6 +206,7 @@ export default function App() {
             const f = await h.getFile();
             setFileName(f.name);
             setHandle(h);
+            await rememberHandle(h);
             const bytes = await readBytes(h);
             setPendingBytes(bytes);
             setUnlockOpen(true);
@@ -267,16 +356,33 @@ export default function App() {
     async function copyAndClear(text, ms = 15000) {
         if (!text)
             return;
+        // stop any previous ticker
+        if (clipboardTicker.current != null) {
+            clearInterval(clipboardTicker.current);
+            clipboardTicker.current = null;
+        }
         await navigator.clipboard.writeText(text);
-        setStatus(`Copied (clears in ${ms / 1000}s)`);
-        setTimeout(async () => {
-            try {
-                await navigator.clipboard.writeText("");
+        let secs = Math.max(1, Math.round(ms / 1000));
+        setStatus(`Copied (clears in ${secs}s)`);
+        clipboardTicker.current = window.setInterval(() => {
+            secs -= 1;
+            if (secs > 0) {
+                setStatus(`Copied (clears in ${secs}s)`);
             }
-            catch { }
-            setStatus("Clipboard cleared");
-        }, ms);
-        noteActivity();
+            else {
+                if (clipboardTicker.current != null) {
+                    clearInterval(clipboardTicker.current);
+                    clipboardTicker.current = null;
+                }
+                // best-effort wipe
+                try {
+                    navigator.clipboard.writeText(" ");
+                    navigator.clipboard.writeText("");
+                }
+                catch { }
+                setStatus("Clipboard cleared");
+            }
+        }, 1000);
     }
     function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
     // ---------- UI ----------
@@ -284,11 +390,18 @@ export default function App() {
                                             const file = e.target.files?.[0];
                                             if (file)
                                                 await handleMobileFile(file);
-                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } })), canInstall && (_jsx("button", { onClick: async () => {
+                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } })), db && (_jsx("button", { onClick: handleNewEntry, title: "Create a new entry in the current group", children: "New" })), canInstall && (_jsx("button", { onClick: async () => {
                             const res = await triggerInstall();
                             if (res === "accepted")
                                 setStatus("App installed");
                             else if (res === "dismissed")
                                 setStatus("Install dismissed");
-                        }, title: "Install this app", children: "Install app" }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock })] }));
+                        }, title: "Install this app", children: "Install app" })), !canInstall && isIOS() && !isStandaloneIOS() && (_jsx("button", { onClick: () => setShowIOSHelp(true), title: "Add to Home Screen on iOS", children: "Install on iOS" }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock }), showIOSHelp && (_jsx("div", { style: {
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,.4)",
+                    display: "grid",
+                    placeItems: "center",
+                    zIndex: 100
+                }, onClick: () => setShowIOSHelp(false), children: _jsxs("div", { style: { background: "#fff", padding: 16, borderRadius: 8, maxWidth: 420 }, onClick: (e) => e.stopPropagation(), children: [_jsx("h3", { style: { marginTop: 0 }, children: "Install on iOS" }), _jsxs("ol", { style: { lineHeight: 1.6 }, children: [_jsxs("li", { children: ["Open this site in ", _jsx("strong", { children: "Safari" }), "."] }), _jsxs("li", { children: ["Tap the ", _jsx("strong", { children: "Share" }), " icon (square with an up arrow)."] }), _jsxs("li", { children: ["Scroll and tap ", _jsx("strong", { children: "Add to Home Screen" }), "."] }), _jsxs("li", { children: ["Tap ", _jsx("strong", { children: "Add" }), ". Launch from the new home screen icon."] })] }), _jsx("p", { style: { fontSize: 14, opacity: .8, marginTop: 8 }, children: "Tip: On iOS, Chrome/Edge also rely on Safari\u2019s engine and don\u2019t show a native install prompt. Use Safari for Add to Home Screen." }), _jsx("div", { style: { textAlign: "right" }, children: _jsx("button", { onClick: () => setShowIOSHelp(false), children: "Close" }) })] }) }))] }));
 }

@@ -9,6 +9,11 @@ import { saveVaultBytes } from "./fs/mobileStore";
 import { setupPWAInstall, triggerInstall } from "./pwa/install";
 import { isIOS, isStandaloneIOS } from "./pwa/ios";
 import "./app.css";
+import { addNewEntry } from "./crypto/keepass";
+import { rememberHandle, getRememberedHandle } from "./fs/recents";
+import { loadVaultBytes } from "./fs/mobileStore"; // you already have saveVaultBytes; ensure loadVaultBytes exists
+import { createNewDb } from "./crypto/keepass";
+
 
 // ---------- helpers ----------
 function unwrap(val: any): string {
@@ -37,6 +42,8 @@ export default function App() {
 
   const [q, setQ] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  
+  const clipboardTicker = useRef<number | null>(null);
 
   // ---- Auto-lock state ----
   const [autoLockMins, setAutoLockMins] = useState<number>(5);
@@ -48,6 +55,50 @@ export default function App() {
   useEffect(() => {
     setupPWAInstall(setCanInstall);
   }, []);
+
+   // New Database
+
+  async function createNewVault() {
+  try {
+    const pw = window.prompt("Set a master password for the new vault:");
+    if (!pw) return;
+
+    const newDb = await createNewDb(pw, "Saavi");
+    setDb(newDb);
+    setDirty(true);
+    setSelectedGroupId(null);
+    setOpenedEntryId(null);
+
+    if (hasFilePicker()) {
+      // Let user choose where to save it
+      const h = await (window as any).showSaveFilePicker({
+        suggestedName: "new-vault.kdbx",
+        types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
+      });
+      await ensurePerm(h, "readwrite");
+      const out = await saveKdbx(newDb);
+      await writeBytes(h, out);
+      setHandle(h);
+      setFileName("new-vault.kdbx");
+      setDirty(false);
+      await rememberHandle(h);
+      setStatus("New vault created");
+    } else {
+      // Mobile: download new file
+      const out = await saveKdbx(newDb);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+      a.download = "new-vault.kdbx";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setDirty(false);
+      setStatus("New vault created (downloaded)");
+    }
+  } catch (e: any) {
+    setStatus(e?.message || "Create failed");
+  }
+}
+
 
   // iOS helper modal
   const [showIOSHelp, setShowIOSHelp] = useState(false);
@@ -98,6 +149,21 @@ export default function App() {
       navigator.clipboard.writeText("");
     } catch {}
   }
+
+   if (clipboardTicker.current != null) {
+      clearInterval(clipboardTicker.current);
+      clipboardTicker.current = null;
+    }
+
+    useEffect(() => {
+  return () => {
+    if (clipboardTicker.current != null) {
+        clearInterval(clipboardTicker.current);
+        clipboardTicker.current = null;
+        }
+        };
+      }, []);
+
   useEffect(() => {
     const act = () => noteActivity();
     window.addEventListener("pointerdown", act, { passive: true });
@@ -115,6 +181,37 @@ export default function App() {
   }, [db, autoLockMins]);
   useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
 
+  // ---- NEW DATABASE
+
+ <button onClick={createNewVault} title="Create a new KDBX vault">New vault</button>
+
+
+  // ----- NEW ENTRY -----
+    async function handleNewEntry() {
+      if (!db) return;
+      // pick group: selected or root
+      const groupRef = (function findGroupById(g: any, id: string | null): any {
+        if (!id) return rootGroup;
+        if (g.uuid?.id === id) return g;
+        for (const x of g.groups || []) {
+          const hit = findGroupById(x, id);
+          if (hit) return hit;
+        }
+        return rootGroup;
+      })(rootGroup, selectedGroupId);
+
+      const en = addNewEntry(db, groupRef, { title: "New Entry" });
+      setDirty(true);
+      // open it for editing
+      setOpenedEntryId(en.uuid.id);
+      setStatus("New entry created (unsaved)");
+      noteActivity?.();
+    }
+
+    // -- REOPEN LAST DATABSE
+    
+    
+
   // ----- OPEN / SAVE -----
   async function doOpen() {
     try {
@@ -123,6 +220,7 @@ export default function App() {
       const f = await h.getFile();
       setFileName(f.name);
       setHandle(h);
+      await rememberHandle(h);
       const bytes = await readBytes(h);
       setPendingBytes(bytes);
       setUnlockOpen(true);
@@ -259,16 +357,39 @@ export default function App() {
     const pv = item._ref?.fields?.get ? item._ref.fields.get("Password") : item._ref?.fields?.Password;
     return unwrap(pv);
   }
-  async function copyAndClear(text: string, ms = 15000) {
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
-    setStatus(`Copied (clears in ${ms/1000}s)`);
-    setTimeout(async () => {
-      try { await navigator.clipboard.writeText(""); } catch {}
-      setStatus("Clipboard cleared");
-    }, ms);
-    noteActivity();
+async function copyAndClear(text: string, ms = 15000) {
+  if (!text) return;
+
+  // stop any previous ticker
+  if (clipboardTicker.current != null) {
+    clearInterval(clipboardTicker.current);
+    clipboardTicker.current = null;
   }
+
+  await navigator.clipboard.writeText(text);
+
+  let secs = Math.max(1, Math.round(ms / 1000));
+  setStatus(`Copied (clears in ${secs}s)`);
+
+  clipboardTicker.current = window.setInterval(() => {
+    secs -= 1;
+    if (secs > 0) {
+      setStatus(`Copied (clears in ${secs}s)`);
+    } else {
+      if (clipboardTicker.current != null) {
+        clearInterval(clipboardTicker.current);
+        clipboardTicker.current = null;
+      }
+      // best-effort wipe
+      try {
+        navigator.clipboard.writeText(" ");
+        navigator.clipboard.writeText("");
+      } catch {}
+      setStatus("Clipboard cleared");
+    }
+  }, 1000);
+}
+
   function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
 
   // ---------- UI ----------
@@ -333,6 +454,11 @@ export default function App() {
             style={{ padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 }}
           />
         )}
+
+        {db && (
+        <button onClick={handleNewEntry} title="Create a new entry in the current group">New</button>
+        )}
+
 
         {/* PWA Install: Android/Desktop via beforeinstallprompt */}
         {canInstall && (
