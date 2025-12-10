@@ -6,6 +6,7 @@ export default function UnlockDialog({ open, onCancel, onUnlock }) {
     const [keyFile, setKeyFile] = useState(undefined);
     const inputRef = useRef(null);
     const keyInputRef = useRef(null);
+
     // Reset dialog each time it opens
     useEffect(() => {
         if (!open)

@@ -13,6 +13,9 @@ export default function UnlockDialog({ open, onCancel, onUnlock }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
+  const randomName = () => "pw_" + Math.random().toString(36).slice(2);
+  const [pwName] = useState(randomName);
+
   // Reset dialog each time it opens
   useEffect(() => {
     if (!open) return;
@@ -90,7 +93,7 @@ export default function UnlockDialog({ open, onCancel, onUnlock }: Props) {
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            name="master-password"
+            name={pwName}
             inputMode="text"
             style={{ flex: 1, padding: "6px 8px" }}
             placeholder="••••••••"
