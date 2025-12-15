@@ -392,24 +392,7 @@ export default function App() {
   // Prepare Toolbar Actions
   const toolbarActions = (
     <>
-      {/* Search Bar - Always Visible but flexible */}
-      {db && (
-        <TextField
-          variant="outlined"
-          size="small"
-          placeholder="Search..."
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          sx={{
-            bgcolor: 'rgba(255,255,255,0.1)',
-            borderRadius: 1,
-            input: { color: 'white', py: 0.5 },
-            fieldset: { border: 'none' },
-            width: isMobile ? 120 : 200,
-            mr: 1
-          }}
-        />
-      )}
+
 
       {/* Desktop: Full Buttons | Mobile: Menu */}
       {!isMobile ? (
@@ -499,6 +482,25 @@ export default function App() {
             )}
           </Menu>
         </>
+      )}
+
+      {/* Search Bar - Always Visible but flexible */}
+      {db && (
+        <TextField
+          variant="outlined"
+          size="small"
+          placeholder="Search..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          sx={{
+            bgcolor: 'rgba(255,255,255,0.1)',
+            borderRadius: 1,
+            input: { color: 'white', py: 0.5 },
+            fieldset: { border: 'none' },
+            width: isMobile ? 120 : 200,
+            ml: 1
+          }}
+        />
       )}
 
       {/* AutoLock Select - Keep visible or move to menu? Keeping visible for now as it's small */}
