@@ -384,24 +384,27 @@ export default function App() {
   // Prepare Toolbar Actions
   const toolbarActions = (
     <>
-      <Button color="inherit" onClick={doOpen}>Open</Button>
+      {/* Open: Desktop vs Mobile */}
+      {hasFilePicker() ? (
+        <Button color="inherit" onClick={doOpen}>Open</Button>
+      ) : (
+        <Button color="inherit" component="label">
+          Open File
+          <input type="file" accept=".kdbx" hidden onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (file) await handleMobileFile(file);
+          }} />
+        </Button>
+      )}
+
       <Button color="inherit" onClick={reopenLast}>Recents</Button>
       <Button color="inherit" onClick={createNewVault}>New</Button>
 
-      <Button color="inherit" onClick={doSave} disabled={!db || !handle || !dirty}>Save</Button>
-
-      {/* Mobile Open (File Input) */}
-      {!hasFilePicker() && (
-        <>
-          <Button color="inherit" component="label">
-            Open File
-            <input type="file" accept=".kdbx" hidden onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (file) await handleMobileFile(file);
-            }} />
-          </Button>
-          <Button color="inherit" onClick={saveAsDownload} disabled={!db || !dirty}>Save As</Button>
-        </>
+      {/* Save: Desktop vs Mobile */}
+      {hasFilePicker() ? (
+        <Button color="inherit" onClick={doSave} disabled={!db || !handle || !dirty}>Save</Button>
+      ) : (
+        <Button color="inherit" onClick={saveAsDownload} disabled={!db || !dirty}>Save As</Button>
       )}
 
       {db && (
