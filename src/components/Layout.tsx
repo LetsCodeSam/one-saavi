@@ -53,12 +53,14 @@ export default function Layout({ title, status, sidebar, children, toolbarAction
                         </IconButton>
                     )}
 
-                    <Stack spacing={1} direction="row" alignItems="center" sx={{ flexGrow: 1 }}>
-                        <Typography variant="h6" noWrap component="div">
+                    <Stack spacing={0} direction="column" alignItems="flex-start" justifyContent="center" sx={{ flexGrow: 1 }}>
+                        <Typography variant="h6" noWrap component="div" sx={{ lineHeight: 1.2 }}>
                             {title}
                         </Typography>
                         {status && (
-                            <Chip label={status} size="small" variant="outlined" sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,0.3)' }} />
+                            <Typography variant="caption" noWrap sx={{ opacity: 0.7, lineHeight: 1 }}>
+                                {status}
+                            </Typography>
                         )}
                     </Stack>
 

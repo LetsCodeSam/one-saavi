@@ -497,7 +497,7 @@ export default function App() {
             borderRadius: 1,
             input: { color: 'white', py: 0.5 },
             fieldset: { border: 'none' },
-            width: isMobile ? 120 : 200,
+            width: { xs: 120, sm: 200, md: 250 },
             ml: 1
           }}
         />
