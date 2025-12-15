@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ThemeProvider } from "@mui/material/styles";
-import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl } from "@mui/material";
+import { ThemeProvider, useTheme } from "@mui/material/styles";
+import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl, useMediaQuery, IconButton, Menu, Divider } from "@mui/material";
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
 import { openKdbx, saveKdbx, addNewEntry, createNewDb } from "./crypto/keepass";
@@ -381,53 +382,17 @@ export default function App() {
   }
 
   /* ---------------- UI ---------------- */
+  /* ---------------- UI ---------------- */
+  // Responsive Helpers
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => setAnchorEl(event.currentTarget);
+  const handleMenuClose = () => setAnchorEl(null);
+
   // Prepare Toolbar Actions
   const toolbarActions = (
     <>
-      {/* Open: Desktop vs Mobile */}
-      {hasFilePicker() ? (
-        <Button color="inherit" onClick={doOpen}>Open</Button>
-      ) : (
-        <Button color="inherit" component="label">
-          Open File
-          <input type="file" accept=".kdbx" hidden onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (file) await handleMobileFile(file);
-          }} />
-        </Button>
-      )}
-
-      <Button color="inherit" onClick={reopenLast}>Recents</Button>
-      <Button color="inherit" onClick={createNewVault}>New</Button>
-
-      {/* Save: Desktop vs Mobile */}
-      {hasFilePicker() ? (
-        <Button color="inherit" onClick={doSave} disabled={!db || !handle || !dirty}>Save</Button>
-      ) : (
-        <Button color="inherit" onClick={saveAsDownload} disabled={!db || !dirty}>Save As</Button>
-      )}
-
-      {db && (
-        <>
-          <Button color="inherit" onClick={() => lockNow("Locked manually")}>Lock</Button>
-          {/* Simple Select for AutoLock */}
-          <FormControl variant="standard" sx={{ ml: 1, minWidth: 60 }}>
-            <Select
-              value={autoLockMins}
-              onChange={(e) => setAutoLockMins(Number(e.target.value))}
-              sx={{ color: 'inherit', '&:before': { borderBottomColor: 'white' }, '& svg': { color: 'white' } }}
-            >
-              <MenuItem value={1}>1m</MenuItem>
-              <MenuItem value={3}>3m</MenuItem>
-              <MenuItem value={5}>5m</MenuItem>
-              <MenuItem value={10}>10m</MenuItem>
-              <MenuItem value={15}>15m</MenuItem>
-              <MenuItem value={30}>30m</MenuItem>
-            </Select>
-          </FormControl>
-        </>
-      )}
-
+      {/* Search Bar - Always Visible but flexible */}
       {db && (
         <TextField
           variant="outlined"
@@ -438,24 +403,117 @@ export default function App() {
           sx={{
             bgcolor: 'rgba(255,255,255,0.1)',
             borderRadius: 1,
-            input: { color: 'white' },
-            fieldset: { border: 'none' }
+            input: { color: 'white', py: 0.5 },
+            fieldset: { border: 'none' },
+            width: isMobile ? 120 : 200,
+            mr: 1
           }}
         />
       )}
 
-      {/* Install Button Logic */}
-      {canInstall && (
-        <Button color="secondary" variant="contained" onClick={async () => {
-          const res = await triggerInstall();
-          if (res === "accepted") setStatus("App installed");
-          else if (res === "dismissed") setStatus("Install dismissed");
-        }}>
-          Install App
-        </Button>
+      {/* Desktop: Full Buttons | Mobile: Menu */}
+      {!isMobile ? (
+        <>
+          {/* Open: Desktop vs Mobile */}
+          {hasFilePicker() ? (
+            <Button color="inherit" onClick={doOpen}>Open</Button>
+          ) : (
+            <Button color="inherit" component="label">
+              Open File
+              <input type="file" accept=".kdbx" hidden onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) await handleMobileFile(file);
+              }} />
+            </Button>
+          )}
+
+          <Button color="inherit" onClick={reopenLast}>Recents</Button>
+          <Button color="inherit" onClick={createNewVault}>New</Button>
+
+          {/* Save: Desktop vs Mobile */}
+          {hasFilePicker() ? (
+            <Button color="inherit" onClick={doSave} disabled={!db || !handle || !dirty}>Save</Button>
+          ) : (
+            <Button color="inherit" onClick={saveAsDownload} disabled={!db || !dirty}>Save As</Button>
+          )}
+
+          {db && <Button color="inherit" onClick={() => lockNow("Locked manually")}>Lock</Button>}
+
+          {canInstall && (
+            <Button color="secondary" variant="contained" onClick={async () => {
+              const res = await triggerInstall();
+              if (res === "accepted") setStatus("App installed");
+            }} sx={{ ml: 1 }}>
+              Install
+            </Button>
+          )}
+        </>
+      ) : (
+        <>
+          <IconButton color="inherit" onClick={handleMenuOpen}>
+            <MoreVertIcon />
+          </IconButton>
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={handleMenuClose}
+          >
+            {hasFilePicker() ? (
+              <MenuItem onClick={() => { handleMenuClose(); doOpen(); }}>Open</MenuItem>
+            ) : (
+              <MenuItem component="label">
+                Open File
+                <input type="file" accept=".kdbx" hidden onChange={async (e) => {
+                  handleMenuClose();
+                  const file = e.target.files?.[0];
+                  if (file) await handleMobileFile(file);
+                }} />
+              </MenuItem>
+            )}
+
+            <MenuItem onClick={() => { handleMenuClose(); reopenLast(); }}>Recents</MenuItem>
+            <MenuItem onClick={() => { handleMenuClose(); createNewVault(); }}>New Vault</MenuItem>
+            <Divider />
+
+            {hasFilePicker() ? (
+              <MenuItem onClick={() => { handleMenuClose(); doSave(); }} disabled={!db || !handle || !dirty}>Save</MenuItem>
+            ) : (
+              <MenuItem onClick={() => { handleMenuClose(); saveAsDownload(); }} disabled={!db || !dirty}>Save As</MenuItem>
+            )}
+
+            {db && (
+              <MenuItem onClick={() => { handleMenuClose(); lockNow("Locked manually"); }}>Lock Vault</MenuItem>
+            )}
+
+            {canInstall && (
+              <MenuItem onClick={async () => {
+                handleMenuClose();
+                const res = await triggerInstall();
+                if (res === "accepted") setStatus("App installed");
+              }}>
+                Install App
+              </MenuItem>
+            )}
+            {!canInstall && isIOS() && !isStandaloneIOS() && (
+              <MenuItem onClick={() => { handleMenuClose(); setShowIOSHelp(true); }}>iOS Install Info</MenuItem>
+            )}
+          </Menu>
+        </>
       )}
-      {!canInstall && isIOS() && !isStandaloneIOS() && (
-        <Button color="inherit" onClick={() => setShowIOSHelp(true)}>iOS Install</Button>
+
+      {/* AutoLock Select - Keep visible or move to menu? Keeping visible for now as it's small */}
+      {db && !isMobile && (
+        <FormControl variant="standard" sx={{ ml: 1, minWidth: 60 }}>
+          <Select
+            value={autoLockMins}
+            onChange={(e) => setAutoLockMins(Number(e.target.value))}
+            sx={{ color: 'inherit', '&:before': { borderBottomColor: 'white' }, '& svg': { color: 'white' } }}
+          >
+            <MenuItem value={1}>1m</MenuItem>
+            <MenuItem value={5}>5m</MenuItem>
+            <MenuItem value={15}>15m</MenuItem>
+          </Select>
+        </FormControl>
       )}
     </>
   );
