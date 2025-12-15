@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ThemeProvider, useTheme } from "@mui/material/styles";
-import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl, useMediaQuery, IconButton, Menu, Divider } from "@mui/material";
+import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl, useMediaQuery, IconButton, Menu, Divider, Typography } from "@mui/material";
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
@@ -403,7 +403,7 @@ export default function App() {
           ) : (
             <Button color="inherit" component="label">
               Open File
-              <input type="file" accept=".kdbx" hidden onChange={async (e) => {
+              <input type="file" accept=".kdbx,application/octet-stream" hidden onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (file) await handleMobileFile(file);
               }} />
@@ -446,7 +446,7 @@ export default function App() {
             ) : (
               <MenuItem component="label">
                 Open File
-                <input type="file" accept=".kdbx" hidden onChange={async (e) => {
+                <input type="file" accept=".kdbx,application/octet-stream" hidden onChange={async (e) => {
                   handleMenuClose();
                   const file = e.target.files?.[0];
                   if (file) await handleMobileFile(file);
@@ -561,6 +561,21 @@ export default function App() {
         ) : (
           <Box sx={{ textAlign: 'center', mt: 10, opacity: 0.6 }}>
             <h2>Open a KeePass database to start</h2>
+
+            <Typography
+              variant="caption"
+              sx={{
+                position: 'fixed',
+                bottom: 20,
+                left: 0,
+                width: '100%',
+                textAlign: 'center',
+                opacity: 0.3,
+                fontFamily: 'monospace'
+              }}
+            >
+              * SamLabs *
+            </Typography>
           </Box>
         )}
 
