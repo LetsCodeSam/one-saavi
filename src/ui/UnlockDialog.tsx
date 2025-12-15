@@ -1,4 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Button,
+  IconButton,
+  InputAdornment,
+  Typography,
+  Stack
+} from "@mui/material";
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import KeyIcon from '@mui/icons-material/Key';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 
 type Props = {
   open: boolean;
@@ -10,11 +26,9 @@ export default function UnlockDialog({ open, onCancel, onUnlock }: Props) {
   const [pw, setPw] = useState("");
   const [reveal, setReveal] = useState(false);
   const [keyFile, setKeyFile] = useState<File | undefined>(undefined);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const keyInputRef = useRef<HTMLInputElement>(null);
 
-  const randomName = () => "pw_" + Math.random().toString(36).slice(2);
-  const [pwName] = useState(randomName);
+  // Anti-autofill random name
+  const [pwName] = useState(() => "pw_" + Math.random().toString(36).slice(2));
 
   // Reset dialog each time it opens
   useEffect(() => {
@@ -22,114 +36,105 @@ export default function UnlockDialog({ open, onCancel, onUnlock }: Props) {
     setPw("");
     setReveal(false);
     setKeyFile(undefined);
-    if (keyInputRef.current) keyInputRef.current.value = "";
-    const t = setTimeout(() => inputRef.current?.focus(), 0);
-    return () => clearTimeout(t);
   }, [open]);
 
-  // Allow Esc to close
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onCancel]);
-
-  if (!open) return null;
-
-  function submit() {
+  function submit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
     if (pw) onUnlock(pw, keyFile);
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    submit();
-  }
-
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.35)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 50,
-      }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        autoComplete="off"
-        style={{
-          background: "#fff",
-          padding: 16,
-          borderRadius: 8,
-          minWidth: 320,
-          boxShadow: "0 8px 30px rgba(0,0,0,.12)",
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Unlock vault</h3>
+    <Dialog open={open} onClose={onCancel} maxWidth="xs" fullWidth>
+      <DialogTitle>Unlock Vault</DialogTitle>
 
-        <label style={{ display: "block", margin: "8px 0 4px" }}>Master password</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            ref={inputRef}
-            type={reveal ? "text" : "password"}
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            // these attributes prevent browser password managers
-            autoComplete="new-password"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            name={pwName}
-            inputMode="text"
-            style={{ flex: 1, padding: "6px 8px" }}
-            placeholder="••••••••"
-          />
-          <button
-            type="button"
-            onClick={() => setReveal((v) => !v)}
-            aria-label={reveal ? "Hide password" : "Show password"}
-          >
-            {reveal ? "Hide" : "Show"}
-          </button>
-        </div>
+      <DialogContent>
+        <form onSubmit={submit} style={{ marginTop: 8 }}>
+          <Stack spacing={3}>
+            <TextField
+              autoFocus
+              label="Master Password"
+              type={reveal ? "text" : "password"}
+              fullWidth
+              variant="outlined"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              name={pwName}
+              autoComplete="off"
+              inputProps={{
+                autoComplete: "one-time-code",
+                form: { autocomplete: 'off' },
+                "data-lpignore": "true", // LastPass
+                "data-form-type": "other",
+                "data-1p-ignore": "true", // 1Password
+              }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <KeyIcon color="action" />
+                  </InputAdornment>
+                ),
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      aria-label="toggle password visibility"
+                      onClick={() => setReveal(!reveal)}
+                      edge="end"
+                    >
+                      {reveal ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }}
+            />
 
-        <label style={{ display: "block", margin: "12px 0 6px" }}>Key file (optional)</label>
-        <input
-          ref={keyInputRef}
-          type="file"
-          accept=".key"
-          onChange={(e) => setKeyFile(e.target.files?.[0] || undefined)}
-        />
+            <Box>
+              <Typography variant="body2" gutterBottom>
+                Key File (Optional)
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Button
+                  variant="outlined"
+                  component="label"
+                  startIcon={<UploadFileIcon />}
+                  size="small"
+                >
+                  Select File
+                  <input
+                    type="file"
+                    hidden
+                    accept=".key"
+                    onChange={(e) => setKeyFile(e.target.files?.[0] || undefined)}
+                  />
+                </Button>
+                {keyFile && (
+                  <Typography variant="caption" noWrap sx={{ maxWidth: 200 }}>
+                    {keyFile.name}
+                  </Typography>
+                )}
+              </Stack>
+            </Box>
+          </Stack>
 
-        {/* Hidden submit button for iOS */}
-        <button
-          type="submit"
-          style={{ position: "absolute", left: -9999, width: 1, height: 1 }}
-          aria-hidden="true"
-          tabIndex={-1}
-        >
-          submit
-        </button>
+          {/* Hidden submit for Enter key */}
+          <input type="submit" hidden />
+        </form>
+      </DialogContent>
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-          <button type="button" onClick={onCancel}>Cancel</button>
-          <button type="submit" disabled={!pw}>Unlock</button>
-        </div>
-      </form>
-    </div>
+      <DialogActions>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={() => submit()} variant="contained" disabled={!pw}>
+          Unlock
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
+
+// Helper Box component since we used it
+import { Box } from "@mui/material";

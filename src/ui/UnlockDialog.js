@@ -1,12 +1,16 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, IconButton, InputAdornment, Typography, Stack } from "@mui/material";
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import KeyIcon from '@mui/icons-material/Key';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 export default function UnlockDialog({ open, onCancel, onUnlock }) {
     const [pw, setPw] = useState("");
     const [reveal, setReveal] = useState(false);
     const [keyFile, setKeyFile] = useState(undefined);
-    const inputRef = useRef(null);
-    const keyInputRef = useRef(null);
-
+    // Anti-autofill random name
+    const [pwName] = useState(() => "pw_" + Math.random().toString(36).slice(2));
     // Reset dialog each time it opens
     useEffect(() => {
         if (!open)
@@ -14,53 +18,28 @@ export default function UnlockDialog({ open, onCancel, onUnlock }) {
         setPw("");
         setReveal(false);
         setKeyFile(undefined);
-        if (keyInputRef.current)
-            keyInputRef.current.value = "";
-        const t = setTimeout(() => inputRef.current?.focus(), 0);
-        return () => clearTimeout(t);
     }, [open]);
-    // Allow Esc to close
-    useEffect(() => {
-        if (!open)
-            return;
-        const handler = (e) => {
-            if (e.key === "Escape") {
-                e.preventDefault();
-                onCancel();
-            }
-        };
-        window.addEventListener("keydown", handler);
-        return () => window.removeEventListener("keydown", handler);
-    }, [open, onCancel]);
-    if (!open)
-        return null;
-    function submit() {
+    function submit(e) {
+        if (e)
+            e.preventDefault();
         if (pw)
             onUnlock(pw, keyFile);
     }
-    function handleSubmit(e) {
-        e.preventDefault();
-        submit();
-    }
-    return (_jsx("div", { style: {
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,.35)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 50,
-        }, children: _jsxs("form", { onSubmit: handleSubmit, autoComplete: "off", style: {
-                background: "#fff",
-                padding: 16,
-                borderRadius: 8,
-                minWidth: 320,
-                boxShadow: "0 8px 30px rgba(0,0,0,.12)",
-            }, children: [_jsx("h3", { style: { marginTop: 0 }, children: "Unlock vault" }), _jsx("label", { style: { display: "block", margin: "8px 0 4px" }, children: "Master password" }), _jsxs("div", { style: { display: "flex", gap: 8 }, children: [_jsx("input", { ref: inputRef, type: reveal ? "text" : "password", value: pw, onChange: (e) => setPw(e.target.value), onKeyDown: (e) => {
-                                if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    submit();
-                                }
-                            }, 
-                            // these attributes prevent browser password managers
-                            autoComplete: "new-password", autoCorrect: "off", autoCapitalize: "off", spellCheck: false, name: "master-password", inputMode: "text", style: { flex: 1, padding: "6px 8px" }, placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" }), _jsx("button", { type: "button", onClick: () => setReveal((v) => !v), "aria-label": reveal ? "Hide password" : "Show password", children: reveal ? "Hide" : "Show" })] }), _jsx("label", { style: { display: "block", margin: "12px 0 6px" }, children: "Key file (optional)" }), _jsx("input", { ref: keyInputRef, type: "file", accept: ".key", onChange: (e) => setKeyFile(e.target.files?.[0] || undefined) }), _jsx("button", { type: "submit", style: { position: "absolute", left: -9999, width: 1, height: 1 }, "aria-hidden": "true", tabIndex: -1, children: "submit" }), _jsxs("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }, children: [_jsx("button", { type: "button", onClick: onCancel, children: "Cancel" }), _jsx("button", { type: "submit", disabled: !pw, children: "Unlock" })] })] }) }));
+    return (_jsxs(Dialog, { open: open, onClose: onCancel, maxWidth: "xs", fullWidth: true, children: [_jsx(DialogTitle, { children: "Unlock Vault" }), _jsx(DialogContent, { children: _jsxs("form", { onSubmit: submit, style: { marginTop: 8 }, children: [_jsxs(Stack, { spacing: 3, children: [_jsx(TextField, { autoFocus: true, label: "Master Password", type: reveal ? "text" : "password", fullWidth: true, variant: "outlined", value: pw, onChange: (e) => setPw(e.target.value), onKeyDown: (e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            submit();
+                                        }
+                                    }, name: pwName, autoComplete: "off", inputProps: {
+                                        autoComplete: "one-time-code",
+                                        form: { autocomplete: 'off' },
+                                        "data-lpignore": "true", // LastPass
+                                        "data-form-type": "other",
+                                        "data-1p-ignore": "true", // 1Password
+                                    }, InputProps: {
+                                        startAdornment: (_jsx(InputAdornment, { position: "start", children: _jsx(KeyIcon, { color: "action" }) })),
+                                        endAdornment: (_jsx(InputAdornment, { position: "end", children: _jsx(IconButton, { "aria-label": "toggle password visibility", onClick: () => setReveal(!reveal), edge: "end", children: reveal ? _jsx(VisibilityOff, {}) : _jsx(Visibility, {}) }) }))
+                                    } }), _jsxs(Box, { children: [_jsx(Typography, { variant: "body2", gutterBottom: true, children: "Key File (Optional)" }), _jsxs(Stack, { direction: "row", spacing: 1, alignItems: "center", children: [_jsxs(Button, { variant: "outlined", component: "label", startIcon: _jsx(UploadFileIcon, {}), size: "small", children: ["Select File", _jsx("input", { type: "file", hidden: true, accept: ".key", onChange: (e) => setKeyFile(e.target.files?.[0] || undefined) })] }), keyFile && (_jsx(Typography, { variant: "caption", noWrap: true, sx: { maxWidth: 200 }, children: keyFile.name }))] })] })] }), _jsx("input", { type: "submit", hidden: true })] }) }), _jsxs(DialogActions, { children: [_jsx(Button, { onClick: onCancel, children: "Cancel" }), _jsx(Button, { onClick: () => submit(), variant: "contained", disabled: !pw, children: "Unlock" })] })] }));
 }
+// Helper Box component since we used it
+import { Box } from "@mui/material";

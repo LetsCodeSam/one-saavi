@@ -1,4 +1,19 @@
 import React, { useMemo, useState } from "react";
+import {
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Collapse,
+  Badge,
+  Box,
+  Typography
+} from "@mui/material";
+import FolderIcon from '@mui/icons-material/Folder';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import ExpandLess from '@mui/icons-material/ExpandLess';
+import ExpandMore from '@mui/icons-material/ExpandMore';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
 export type GroupNode = {
   id: string;
@@ -23,7 +38,6 @@ export default function GroupTree({ tree, selectedId, onSelect, defaultCollapsed
     if (!rootId) return;
     setOpen((s) => {
       const n = new Set(s);
-      // root expanded, children collapsed by default
       n.add(rootId);
       return n;
     });
@@ -31,7 +45,8 @@ export default function GroupTree({ tree, selectedId, onSelect, defaultCollapsed
 
   if (!tree) return null;
 
-  function toggle(id: string) {
+  function toggle(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
     setOpen((s) => {
       const n = new Set(s);
       if (n.has(id)) n.delete(id);
@@ -43,57 +58,58 @@ export default function GroupTree({ tree, selectedId, onSelect, defaultCollapsed
   function Item({ node, depth }: { node: GroupNode; depth: number }) {
     const hasKids = node.children.length > 0;
     const isOpen = open.has(node.id);
+    const isSelected = selectedId === node.id;
+
     return (
-      <div>
-        <div style={{ display: "flex", alignItems: "center" }}>
-          {hasKids ? (
-            <button
-              onClick={() => toggle(node.id)}
-              aria-label={isOpen ? "Collapse" : "Expand"}
-              title={isOpen ? "Collapse" : "Expand"}
-              style={{
-                width: 22, height: 22, marginRight: 4, border: "1px solid #ddd",
-                borderRadius: 4, lineHeight: "20px", background: "#fff", cursor: "pointer"
-              }}
-            >
-              {isOpen ? "▾" : "▸"}
-            </button>
-          ) : (
-            <span style={{ display: "inline-block", width: 22 }} />
+      <>
+        <ListItemButton
+          selected={isSelected}
+          onClick={() => onSelect(node.id)}
+          sx={{ pl: depth * 2 + 2, py: 0.5 }}
+        >
+          <ListItemIcon sx={{ minWidth: 32 }}>
+            {isOpen ? <FolderOpenIcon color="primary" fontSize="small" /> : <FolderIcon color="disabled" fontSize="small" />}
+          </ListItemIcon>
+
+          <ListItemText
+            primary={node.name}
+            secondary={node.count > 0 ? `${node.count} items` : null}
+            primaryTypographyProps={{ fontSize: '0.9rem', fontWeight: isSelected ? 600 : 400 }}
+            secondaryTypographyProps={{ fontSize: '0.75rem' }}
+          />
+
+          {hasKids && (
+            <Box onClick={(e) => toggle(node.id, e)} sx={{ p: 0.5, borderRadius: '50%', '&:hover': { bgcolor: 'action.hover' } }}>
+              {isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+            </Box>
           )}
+        </ListItemButton>
 
-          <button
-            onClick={() => onSelect(node.id)}
-            style={{
-              padding: "4px 6px",
-              marginLeft: depth * 10,
-              textAlign: "left",
-              background: selectedId === node.id ? "#eef2ff" : "transparent",
-              border: "none",
-              cursor: "pointer",
-              borderRadius: 6
-            }}
-            title={`${node.name} (${node.count})`}
-          >
-            {node.name} <span style={{ opacity: .6 }}>({node.count})</span>
-          </button>
-        </div>
-
-        {hasKids && isOpen && (
-          <div>
-            {node.children.map((c) => (
-              <Item key={c.id} node={c} depth={depth + 1} />
-            ))}
-          </div>
+        {hasKids && (
+          <Collapse in={isOpen} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {node.children.map((c) => (
+                <Item key={c.id} node={c} depth={depth + 1} />
+              ))}
+            </List>
+          </Collapse>
         )}
-      </div>
+      </>
     );
   }
 
   return (
-    <div style={{ padding: 8, maxHeight: "65vh", overflow: "auto" }}>
-      <button onClick={() => onSelect(null)} style={{ marginBottom: 8 }}>All Items</button>
-      <Item node={tree} depth={0} />
-    </div>
+    <Box sx={{ width: '100%', maxWidth: 360, bgcolor: 'background.paper' }}>
+      <ListItemButton onClick={() => onSelect(null)} selected={selectedId === null} sx={{ mb: 1 }}>
+        <ListItemIcon sx={{ minWidth: 32 }}>
+          <Inventory2OutlinedIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText primary="All Items" />
+      </ListItemButton>
+
+      <List component="nav" aria-label="main mailbox folders" disablePadding>
+        <Item node={tree} depth={0} />
+      </List>
+    </Box>
   );
 }

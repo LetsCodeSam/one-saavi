@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ThemeProvider } from "@mui/material/styles";
+import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl } from "@mui/material";
+
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
 import { openKdbx, saveKdbx, addNewEntry, createNewDb } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
@@ -9,6 +12,8 @@ import { saveVaultBytes, loadVaultBytes } from "./fs/mobileStore";
 import { setupPWAInstall, triggerInstall } from "./pwa/install";
 import { isIOS, isStandaloneIOS } from "./pwa/ios";
 import { rememberHandle, getRememberedHandle } from "./fs/recents";
+import Layout from "./components/Layout";
+import theme from "./theme";
 import "./app.css";
 
 
@@ -39,7 +44,9 @@ export default function App() {
   const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
 
   const [q, setQ] = useState("");
-  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // NOTE: Layout handles drawer state internally now, but we removed manual toggle
+  // const [drawerOpen, setDrawerOpen] = useState(false);
 
   /* ---- Auto-lock ---- */
   const [autoLockMins, setAutoLockMins] = useState<number>(5);
@@ -100,14 +107,14 @@ export default function App() {
     setQ("");
     setDirty(false);
     setUnlockOpen(false);
-    setDrawerOpen(false);
+    // setDrawerOpen(false); // Layout handles this
     clearIdleTimer();
     stopClipboardTicker();
     setStatus(reason);
     try {
       navigator.clipboard.writeText(" ");
       navigator.clipboard.writeText("");
-    } catch {}
+    } catch { }
   }
   useEffect(() => {
     const act = () => noteActivity();
@@ -131,7 +138,7 @@ export default function App() {
   async function doOpen() {
     try {
       const h = await pickKdbx();
-      await ensurePerm(h, "readwrite");
+      await ensurePerm(h, "read"); // Don't ask for write until we save
       const f = await h.getFile();
       setFileName(f.name);
       setHandle(h);
@@ -146,6 +153,7 @@ export default function App() {
   async function doSave() {
     if (READ_ONLY || !db || !handle) return;
     try {
+      await ensurePerm(handle, "readwrite"); // Ask for permission now
       const out = await saveKdbx(db);
       await writeBytes(handle, out);
       setDirty(false);
@@ -275,15 +283,10 @@ export default function App() {
 
   async function copyAndClear(text: string, ms = 15000) {
     if (!text) return;
-
-    // Stop previous countdown if any
     stopClipboardTicker();
-
     await navigator.clipboard.writeText(text);
-
     let secs = Math.max(1, Math.round(ms / 1000));
     setStatus(`Copied (clears in ${secs}s)`);
-
     clipboardTicker.current = window.setInterval(() => {
       secs -= 1;
       if (secs > 0) {
@@ -293,23 +296,21 @@ export default function App() {
         try {
           navigator.clipboard.writeText(" ");
           navigator.clipboard.writeText("");
-        } catch {}
+        } catch { }
         setStatus("Clipboard cleared");
       }
     }, 1000);
-
     noteActivity();
   }
 
   function markDirty() {
-  if (READ_ONLY) return; // do nothing in read-only
-  setDirty(true);
-  setStatus("Edited");
-  noteActivity();
-}
+    if (READ_ONLY) return;
+    setDirty(true);
+    setStatus("Edited");
+    noteActivity();
+  }
 
   /* --------- Reopen last / (optional) --------- */
-
   async function reopenLast() {
     try {
       if (hasFilePicker()) {
@@ -341,166 +342,189 @@ export default function App() {
     }
   }
 
-  
+  /* --------- Create New Vault (from original) --------- */
+  async function createNewVault() {
+    try {
+      const pw = window.prompt("Set a master password for the new vault:");
+      if (!pw) return;
+      const newDb = await createNewDb(pw, "Saavi");
+      setDb(newDb);
+      setDirty(true);
+      setSelectedGroupId(null);
+      setOpenedEntryId(null);
+      if (hasFilePicker()) {
+        const h = await (window as any).showSaveFilePicker({
+          suggestedName: "new-vault.kdbx",
+          types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
+        });
+        await ensurePerm(h, "readwrite");
+        const out = await saveKdbx(newDb);
+        await writeBytes(h, out);
+        setHandle(h);
+        setFileName("new-vault.kdbx");
+        setDirty(false);
+        await rememberHandle(h);
+        setStatus("New vault created");
+      } else {
+        const out = await saveKdbx(newDb);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+        a.download = "new-vault.kdbx";
+        a.click();
+        URL.revokeObjectURL(a.href);
+        setDirty(false);
+        setStatus("New vault created (downloaded)");
+      }
+    } catch (e: any) {
+      setStatus(e?.message || "Create failed");
+    }
+  }
 
   /* ---------------- UI ---------------- */
-  return (
-    <div style={{ maxWidth: 1100, margin: "1.5rem auto", fontFamily: "ui-sans-serif" }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700 }}>One Saavi</h1>
-      <p style={{ opacity: 0.8 }}>
-        Status: {status}{fileName ? ` • ${fileName}` : ""}{dirty ? " • Dirty" : ""}
-      </p>
+  // Prepare Toolbar Actions
+  const toolbarActions = (
+    <>
+      <Button color="inherit" onClick={doOpen}>Open</Button>
+      <Button color="inherit" onClick={reopenLast}>Recents</Button>
+      <Button color="inherit" onClick={createNewVault}>New</Button>
 
-      <div className="topbar" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        {db && (
-          <button className="mobile-only" onClick={() => setDrawerOpen(true)} aria-label="Open groups">
-            ☰ Groups
-          </button>
-        )}
+      <Button color="inherit" onClick={doSave} disabled={!db || !handle || !dirty}>Save</Button>
 
-        <button onClick={doOpen}>Open .kdbx</button>
-        <button onClick={reopenLast}>Reopen last</button>
-                <button onClick={doSave} disabled={!db || !handle || !dirty}>Save</button>
-
-        {!hasFilePicker() && (
-          <>
-            <label style={{ border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }}>
-              <input
-                type="file"
-                accept=".kdbx"
-                style={{ display: "none" }}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (file) await handleMobileFile(file);
-                }}
-              />
-              Open (mobile)
-            </label>
-            <button onClick={saveAsDownload} disabled={!db || !dirty}>Save As (.kdbx)</button>
-          </>
-        )}
-
-        {db && (
-          <>
-            <button onClick={() => lockNow("Locked manually")}>Lock now</button>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span>Auto-lock (mins)</span>
-              <select value={autoLockMins} onChange={(e) => setAutoLockMins(Number(e.target.value))}>
-                <option value={1}>1</option>
-                <option value={3}>3</option>
-                <option value={5}>5</option>
-                <option value={10}>10</option>
-                <option value={15}>15</option>
-                <option value={30}>30</option>
-              </select>
-            </label>
-          </>
-        )}
-
-        {db && (
-          <input
-            className="toolbar-search"
-            placeholder="Search title, username, or URL…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            style={{ padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 }}
-          />
-        )}
-
-        {canInstall && (
-          <button
-            onClick={async () => {
-              const res = await triggerInstall();
-              if (res === "accepted") setStatus("App installed");
-              else if (res === "dismissed") setStatus("Install dismissed");
-            }}
-            title="Install this app"
-          >
-            Install app
-          </button>
-        )}
-        {!canInstall && isIOS() && !isStandaloneIOS() && (
-          <button onClick={() => setShowIOSHelp(true)} title="Add to Home Screen on iOS">
-            Install on iOS
-          </button>
-        )}
-      </div>
+      {/* Mobile Open (File Input) */}
+      {!hasFilePicker() && (
+        <>
+          <Button color="inherit" component="label">
+            Open File
+            <input type="file" accept=".kdbx" hidden onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (file) await handleMobileFile(file);
+            }} />
+          </Button>
+          <Button color="inherit" onClick={saveAsDownload} disabled={!db || !dirty}>Save As</Button>
+        </>
+      )}
 
       {db && (
-        <div className="app-grid">
-          {drawerOpen && <div className="drawer-backdrop mobile-only" onClick={() => setDrawerOpen(false)} />}
-          <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
-            <h3>Groups</h3>
-            <GroupTree
-              tree={groupTree}
-              selectedId={selectedGroupId}
-              onSelect={(id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); }}
-            />
-          </aside>
+        <>
+          <Button color="inherit" onClick={() => lockNow("Locked manually")}>Lock</Button>
+          {/* Simple Select for AutoLock */}
+          <FormControl variant="standard" sx={{ ml: 1, minWidth: 60 }}>
+            <Select
+              value={autoLockMins}
+              onChange={(e) => setAutoLockMins(Number(e.target.value))}
+              sx={{ color: 'inherit', '&:before': { borderBottomColor: 'white' }, '& svg': { color: 'white' } }}
+            >
+              <MenuItem value={1}>1m</MenuItem>
+              <MenuItem value={3}>3m</MenuItem>
+              <MenuItem value={5}>5m</MenuItem>
+              <MenuItem value={10}>10m</MenuItem>
+              <MenuItem value={15}>15m</MenuItem>
+              <MenuItem value={30}>30m</MenuItem>
+            </Select>
+          </FormControl>
+        </>
+      )}
 
-          <main className="main">
-            <h2>Entries {q ? `(${filteredEntries.length})` : `(${entries.length})`}</h2>
-            <div className="table-wrap">
+      {db && (
+        <TextField
+          variant="outlined"
+          size="small"
+          placeholder="Search..."
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          sx={{
+            bgcolor: 'rgba(255,255,255,0.1)',
+            borderRadius: 1,
+            input: { color: 'white' },
+            fieldset: { border: 'none' }
+          }}
+        />
+      )}
+
+      {/* Install Button Logic */}
+      {canInstall && (
+        <Button color="secondary" variant="contained" onClick={async () => {
+          const res = await triggerInstall();
+          if (res === "accepted") setStatus("App installed");
+          else if (res === "dismissed") setStatus("Install dismissed");
+        }}>
+          Install App
+        </Button>
+      )}
+      {!canInstall && isIOS() && !isStandaloneIOS() && (
+        <Button color="inherit" onClick={() => setShowIOSHelp(true)}>iOS Install</Button>
+      )}
+    </>
+  );
+
+  return (
+    <ThemeProvider theme={theme}>
+      <Layout
+        title="One Saavi"
+        status={status}
+        toolbarActions={toolbarActions}
+        sidebar={db ? (
+          <GroupTree
+            tree={groupTree}
+            selectedId={selectedGroupId}
+            onSelect={(id) => { setSelectedGroupId(id); noteActivity(); }}
+          />
+        ) : null}
+      >
+        {db ? (
+          <>
+            <Box sx={{ mb: 2 }}>
+              {/* Title or Breadcrumbs could go here */}
+            </Box>
+            <Box className="table-wrap">
               <EntryList
                 entries={filteredEntries}
                 onReveal={revealPassword}
                 onCopy={copyAndClear}
                 onOpen={(id) => { setOpenedEntryId(id); noteActivity(); }}
               />
-            </div>
+            </Box>
             {selectedEntry && (
-              <div style={{ marginTop: 20 }}>
+              <Box sx={{ mt: 3, p: 2, bgcolor: 'background.paper', borderRadius: 2 }}>
                 <EntryView
                   entry={selectedEntry}
                   onChange={markDirty}
                   onClose={() => { setOpenedEntryId(null); noteActivity(); }}
                   onCopy={copyAndClear}
                 />
-              </div>
+              </Box>
             )}
-          </main>
-        </div>
-      )}
+          </>
+        ) : (
+          <Box sx={{ textAlign: 'center', mt: 10, opacity: 0.6 }}>
+            <h2>Open a KeePass database to start</h2>
+          </Box>
+        )}
 
-      <UnlockDialog
-        open={unlockOpen}
-        onCancel={() => { setUnlockOpen(false); setPendingBytes(null); }}
-        onUnlock={handleUnlock}
-      />
+        {/* Dialogs */}
+        <UnlockDialog
+          open={unlockOpen}
+          onCancel={() => { setUnlockOpen(false); setPendingBytes(null); }}
+          onUnlock={handleUnlock}
+        />
 
-      {showIOSHelp && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,.4)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 100
-          }}
-          onClick={() => setShowIOSHelp(false)}
-        >
-          <div
-            style={{ background: "#fff", padding: 16, borderRadius: 8, maxWidth: 420 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ marginTop: 0 }}>Install on iOS</h3>
-            <ol style={{ lineHeight: 1.6 }}>
-              <li>Open this site in <strong>Safari</strong>.</li>
-              <li>Tap the <strong>Share</strong> icon (square with an up arrow).</li>
-              <li>Scroll and tap <strong>Add to Home Screen</strong>.</li>
-              <li>Tap <strong>Add</strong>. Launch from the new home screen icon.</li>
-            </ol>
-            <p style={{ fontSize: 14, opacity: .8, marginTop: 8 }}>
-              Tip: On iOS, Chrome/Edge also rely on Safari’s engine and don’t show a native install prompt.
-              Use Safari for Add to Home Screen.
-            </p>
-            <div style={{ textAlign: "right" }}>
-              <button onClick={() => setShowIOSHelp(false)}>Close</button>
+        {showIOSHelp && (
+          <div style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999,
+            display: "grid", placeItems: "center"
+          }} onClick={() => setShowIOSHelp(false)}>
+            <div style={{ background: "#222", color: "#fff", padding: 24, borderRadius: 8, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+              <h3>Install on iOS</h3>
+              <ol style={{ lineHeight: 1.6 }}>
+                <li>Open in Safari</li>
+                <li>Tap Share</li>
+                <li>Add to Home Screen</li>
+              </ol>
+              <Button onClick={() => setShowIOSHelp(false)}>Close</Button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </Layout>
+    </ThemeProvider>
   );
 }

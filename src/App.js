@@ -1,7 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ThemeProvider } from "@mui/material/styles";
+import { Button, Box, TextField, Select, MenuItem, FormControl } from "@mui/material";
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
-import { openKdbx, saveKdbx, addNewEntry, createNewDb } from "./crypto/keepass";
+import { openKdbx, saveKdbx, createNewDb } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
 import EntryView from "./ui/EntryView";
 import GroupTree from "./ui/GroupTree";
@@ -10,6 +12,8 @@ import { saveVaultBytes, loadVaultBytes } from "./fs/mobileStore";
 import { setupPWAInstall, triggerInstall } from "./pwa/install";
 import { isIOS, isStandaloneIOS } from "./pwa/ios";
 import { rememberHandle, getRememberedHandle } from "./fs/recents";
+import Layout from "./components/Layout";
+import theme from "./theme";
 import "./app.css";
 /* ---------------- helpers ---------------- */
 function unwrap(val) {
@@ -29,12 +33,14 @@ export default function App() {
     const [status, setStatus] = useState("Ready");
     const [fileName, setFileName] = useState("");
     const [dirty, setDirty] = useState(false);
+    const READ_ONLY = true; // toggle
     const [selectedGroupId, setSelectedGroupId] = useState(null);
     const [openedEntryId, setOpenedEntryId] = useState(null);
     const [unlockOpen, setUnlockOpen] = useState(false);
     const [pendingBytes, setPendingBytes] = useState(null);
     const [q, setQ] = useState("");
-    const [drawerOpen, setDrawerOpen] = useState(false);
+    // NOTE: Layout handles drawer state internally now, but we removed manual toggle
+    // const [drawerOpen, setDrawerOpen] = useState(false);
     /* ---- Auto-lock ---- */
     const [autoLockMins, setAutoLockMins] = useState(5);
     const idleTimer = useRef(null);
@@ -95,7 +101,7 @@ export default function App() {
         setQ("");
         setDirty(false);
         setUnlockOpen(false);
-        setDrawerOpen(false);
+        // setDrawerOpen(false); // Layout handles this
         clearIdleTimer();
         stopClipboardTicker();
         setStatus(reason);
@@ -126,7 +132,7 @@ export default function App() {
     async function doOpen() {
         try {
             const h = await pickKdbx();
-            await ensurePerm(h, "readwrite");
+            await ensurePerm(h, "read"); // Don't ask for write until we save
             const f = await h.getFile();
             setFileName(f.name);
             setHandle(h);
@@ -140,9 +146,10 @@ export default function App() {
         }
     }
     async function doSave() {
-        if (!db || !handle)
+        if (READ_ONLY || !db || !handle)
             return;
         try {
+            await ensurePerm(handle, "readwrite"); // Ask for permission now
             const out = await saveKdbx(db);
             await writeBytes(handle, out);
             setDirty(false);
@@ -280,7 +287,6 @@ export default function App() {
     async function copyAndClear(text, ms = 15000) {
         if (!text)
             return;
-        // Stop previous countdown if any
         stopClipboardTicker();
         await navigator.clipboard.writeText(text);
         let secs = Math.max(1, Math.round(ms / 1000));
@@ -302,30 +308,14 @@ export default function App() {
         }, 1000);
         noteActivity();
     }
-    function markDirty() { setDirty(true); setStatus("Edited"); noteActivity(); }
-    /* --------- New entry / Reopen last / New vault (optional) --------- */
-    async function handleNewEntry() {
-        if (!db || !rootGroup)
+    function markDirty() {
+        if (READ_ONLY)
             return;
-        function findGroupById(g, id) {
-            if (!id)
-                return g;
-            if (g.uuid?.id === id)
-                return g;
-            for (const child of g.groups || []) {
-                const hit = findGroupById(child, id);
-                if (hit)
-                    return hit;
-            }
-            return g;
-        }
-        const groupRef = findGroupById(rootGroup, selectedGroupId);
-        const en = addNewEntry(db, groupRef, { title: "New Entry" });
         setDirty(true);
-        setOpenedEntryId(en.uuid.id);
-        setStatus("New entry created (unsaved)");
+        setStatus("Edited");
         noteActivity();
     }
+    /* --------- Reopen last / (optional) --------- */
     async function reopenLast() {
         try {
             if (hasFilePicker()) {
@@ -357,6 +347,7 @@ export default function App() {
             setStatus(e?.message || "Reopen failed");
         }
     }
+    /* --------- Create New Vault (from original) --------- */
     async function createNewVault() {
         try {
             const pw = window.prompt("Set a master password for the new vault:");
@@ -397,22 +388,25 @@ export default function App() {
         }
     }
     /* ---------------- UI ---------------- */
-    return (_jsxs("div", { style: { maxWidth: 1100, margin: "1.5rem auto", fontFamily: "ui-sans-serif" }, children: [_jsx("h1", { style: { fontSize: 28, fontWeight: 700 }, children: "One Saavi" }), _jsxs("p", { style: { opacity: 0.8 }, children: ["Status: ", status, fileName ? ` • ${fileName}` : "", dirty ? " • Dirty" : ""] }), _jsxs("div", { className: "topbar", style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }, children: [db && (_jsx("button", { className: "mobile-only", onClick: () => setDrawerOpen(true), "aria-label": "Open groups", children: "\u2630 Groups" })), _jsx("button", { onClick: doOpen, children: "Open .kdbx" }), _jsx("button", { onClick: reopenLast, children: "Reopen last" }), _jsx("button", { onClick: createNewVault, children: "New vault" }), _jsx("button", { onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" }), !hasFilePicker() && (_jsxs(_Fragment, { children: [_jsxs("label", { style: { border: "1px solid #ccc", padding: "6px 10px", borderRadius: 6, cursor: "pointer" }, children: [_jsx("input", { type: "file", accept: ".kdbx", style: { display: "none" }, onChange: async (e) => {
-                                            const file = e.target.files?.[0];
-                                            if (file)
-                                                await handleMobileFile(file);
-                                        } }), "Open (mobile)"] }), _jsx("button", { onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As (.kdbx)" })] })), db && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: handleNewEntry, children: "New" }), _jsx("button", { onClick: () => lockNow("Locked manually"), children: "Lock now" }), _jsxs("label", { style: { display: "inline-flex", alignItems: "center", gap: 6 }, children: [_jsx("span", { children: "Auto-lock (mins)" }), _jsxs("select", { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), children: [_jsx("option", { value: 1, children: "1" }), _jsx("option", { value: 3, children: "3" }), _jsx("option", { value: 5, children: "5" }), _jsx("option", { value: 10, children: "10" }), _jsx("option", { value: 15, children: "15" }), _jsx("option", { value: 30, children: "30" })] })] })] })), db && (_jsx("input", { className: "toolbar-search", placeholder: "Search title, username, or URL\u2026", value: q, onChange: (e) => setQ(e.target.value), style: { padding: "6px 10px", border: "1px solid #ccc", borderRadius: 6 } })), canInstall && (_jsx("button", { onClick: async () => {
-                            const res = await triggerInstall();
-                            if (res === "accepted")
-                                setStatus("App installed");
-                            else if (res === "dismissed")
-                                setStatus("Install dismissed");
-                        }, title: "Install this app", children: "Install app" })), !canInstall && isIOS() && !isStandaloneIOS() && (_jsx("button", { onClick: () => setShowIOSHelp(true), title: "Add to Home Screen on iOS", children: "Install on iOS" }))] }), db && (_jsxs("div", { className: "app-grid", children: [drawerOpen && _jsx("div", { className: "drawer-backdrop mobile-only", onClick: () => setDrawerOpen(false) }), _jsxs("aside", { className: `sidebar ${drawerOpen ? "open" : ""}`, children: [_jsx("h3", { children: "Groups" }), _jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); setDrawerOpen(false); noteActivity(); } })] }), _jsxs("main", { className: "main", children: [_jsxs("h2", { children: ["Entries ", q ? `(${filteredEntries.length})` : `(${entries.length})`] }), _jsx("div", { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx("div", { style: { marginTop: 20 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })] })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock }), showIOSHelp && (_jsx("div", { style: {
-                    position: "fixed",
-                    inset: 0,
-                    background: "rgba(0,0,0,.4)",
-                    display: "grid",
-                    placeItems: "center",
-                    zIndex: 100
-                }, onClick: () => setShowIOSHelp(false), children: _jsxs("div", { style: { background: "#fff", padding: 16, borderRadius: 8, maxWidth: 420 }, onClick: (e) => e.stopPropagation(), children: [_jsx("h3", { style: { marginTop: 0 }, children: "Install on iOS" }), _jsxs("ol", { style: { lineHeight: 1.6 }, children: [_jsxs("li", { children: ["Open this site in ", _jsx("strong", { children: "Safari" }), "."] }), _jsxs("li", { children: ["Tap the ", _jsx("strong", { children: "Share" }), " icon (square with an up arrow)."] }), _jsxs("li", { children: ["Scroll and tap ", _jsx("strong", { children: "Add to Home Screen" }), "."] }), _jsxs("li", { children: ["Tap ", _jsx("strong", { children: "Add" }), ". Launch from the new home screen icon."] })] }), _jsx("p", { style: { fontSize: 14, opacity: .8, marginTop: 8 }, children: "Tip: On iOS, Chrome/Edge also rely on Safari\u2019s engine and don\u2019t show a native install prompt. Use Safari for Add to Home Screen." }), _jsx("div", { style: { textAlign: "right" }, children: _jsx("button", { onClick: () => setShowIOSHelp(false), children: "Close" }) })] }) }))] }));
+    // Prepare Toolbar Actions
+    const toolbarActions = (_jsxs(_Fragment, { children: [_jsx(Button, { color: "inherit", onClick: doOpen, children: "Open" }), _jsx(Button, { color: "inherit", onClick: reopenLast, children: "Recents" }), _jsx(Button, { color: "inherit", onClick: createNewVault, children: "New" }), _jsx(Button, { color: "inherit", onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" }), !hasFilePicker() && (_jsxs(_Fragment, { children: [_jsxs(Button, { color: "inherit", component: "label", children: ["Open File", _jsx("input", { type: "file", accept: ".kdbx", hidden: true, onChange: async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file)
+                                        await handleMobileFile(file);
+                                } })] }), _jsx(Button, { color: "inherit", onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As" })] })), db && (_jsxs(_Fragment, { children: [_jsx(Button, { color: "inherit", onClick: () => lockNow("Locked manually"), children: "Lock" }), _jsx(FormControl, { variant: "standard", sx: { ml: 1, minWidth: 60 }, children: _jsxs(Select, { value: autoLockMins, onChange: (e) => setAutoLockMins(Number(e.target.value)), sx: { color: 'inherit', '&:before': { borderBottomColor: 'white' }, '& svg': { color: 'white' } }, children: [_jsx(MenuItem, { value: 1, children: "1m" }), _jsx(MenuItem, { value: 3, children: "3m" }), _jsx(MenuItem, { value: 5, children: "5m" }), _jsx(MenuItem, { value: 10, children: "10m" }), _jsx(MenuItem, { value: 15, children: "15m" }), _jsx(MenuItem, { value: 30, children: "30m" })] }) })] })), db && (_jsx(TextField, { variant: "outlined", size: "small", placeholder: "Search...", value: q, onChange: (e) => setQ(e.target.value), sx: {
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                    borderRadius: 1,
+                    input: { color: 'white' },
+                    fieldset: { border: 'none' }
+                } })), canInstall && (_jsx(Button, { color: "secondary", variant: "contained", onClick: async () => {
+                    const res = await triggerInstall();
+                    if (res === "accepted")
+                        setStatus("App installed");
+                    else if (res === "dismissed")
+                        setStatus("Install dismissed");
+                }, children: "Install App" })), !canInstall && isIOS() && !isStandaloneIOS() && (_jsx(Button, { color: "inherit", onClick: () => setShowIOSHelp(true), children: "iOS Install" }))] }));
+    return (_jsx(ThemeProvider, { theme: theme, children: _jsxs(Layout, { title: "One Saavi", status: status, toolbarActions: toolbarActions, sidebar: db ? (_jsx(GroupTree, { tree: groupTree, selectedId: selectedGroupId, onSelect: (id) => { setSelectedGroupId(id); noteActivity(); } })) : null, children: [db ? (_jsxs(_Fragment, { children: [_jsx(Box, { sx: { mb: 2 } }), _jsx(Box, { className: "table-wrap", children: _jsx(EntryList, { entries: filteredEntries, onReveal: revealPassword, onCopy: copyAndClear, onOpen: (id) => { setOpenedEntryId(id); noteActivity(); } }) }), selectedEntry && (_jsx(Box, { sx: { mt: 3, p: 2, bgcolor: 'background.paper', borderRadius: 2 }, children: _jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear }) }))] })) : (_jsx(Box, { sx: { textAlign: 'center', mt: 10, opacity: 0.6 }, children: _jsx("h2", { children: "Open a KeePass database to start" }) })), _jsx(UnlockDialog, { open: unlockOpen, onCancel: () => { setUnlockOpen(false); setPendingBytes(null); }, onUnlock: handleUnlock }), showIOSHelp && (_jsx("div", { style: {
+                        position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999,
+                        display: "grid", placeItems: "center"
+                    }, onClick: () => setShowIOSHelp(false), children: _jsxs("div", { style: { background: "#222", color: "#fff", padding: 24, borderRadius: 8, maxWidth: 400 }, onClick: e => e.stopPropagation(), children: [_jsx("h3", { children: "Install on iOS" }), _jsxs("ol", { style: { lineHeight: 1.6 }, children: [_jsx("li", { children: "Open in Safari" }), _jsx("li", { children: "Tap Share" }), _jsx("li", { children: "Add to Home Screen" })] }), _jsx(Button, { onClick: () => setShowIOSHelp(false), children: "Close" })] }) }))] }) }));
 }
