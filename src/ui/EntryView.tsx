@@ -22,6 +22,7 @@ type Props = {
   entry: any; // KdbxEntry
   onChange: () => void;
   onClose: () => void;
+  onSave: () => void;
   onCopy: (text: string) => void;
 };
 
@@ -30,7 +31,7 @@ function unwrap(val: any): string {
   return val.getText ? val.getText() : String(val);
 }
 
-export default function EntryView({ entry, onChange, onClose, onCopy }: Props) {
+export default function EntryView({ entry, onChange, onClose, onSave, onCopy }: Props) {
   // We need local state to handle editing fields properly
   const [showPassword, setShowPassword] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -160,8 +161,9 @@ export default function EntryView({ entry, onChange, onClose, onCopy }: Props) {
           />
         </Stack>
       </CardContent>
-      <CardActions sx={{ justifyContent: 'flex-end', p: 2 }}>
-        <Button onClick={onClose}>Close</Button>
+      <CardActions sx={{ justifyContent: 'flex-end', p: 2, gap: 1 }}>
+        <Button onClick={onClose} variant="outlined" color="inherit">Close</Button>
+        <Button onClick={onSave} variant="contained" color="primary">Save & Close</Button>
       </CardActions>
     </Card>
   );

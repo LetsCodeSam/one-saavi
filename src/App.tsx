@@ -609,6 +609,7 @@ export default function App() {
                     entry={selectedEntry}
                     onChange={markDirty}
                     onClose={() => { setOpenedEntryId(null); noteActivity(); }}
+                    onSave={async () => { await doSave(); setOpenedEntryId(null); noteActivity(); }}
                     onCopy={copyAndClear}
                   />
                 )}

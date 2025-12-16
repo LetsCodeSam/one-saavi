@@ -10,7 +10,7 @@ function unwrap(val) {
         return "";
     return val.getText ? val.getText() : String(val);
 }
-export default function EntryView({ entry, onChange, onClose, onCopy }) {
+export default function EntryView({ entry, onChange, onClose, onSave, onCopy }) {
     // We need local state to handle editing fields properly
     const [showPassword, setShowPassword] = useState(false);
     const [dirty, setDirty] = useState(false);
@@ -45,5 +45,5 @@ export default function EntryView({ entry, onChange, onClose, onCopy }) {
                                             endAdornment: (_jsxs(InputAdornment, { position: "end", children: [_jsx(IconButton, { "aria-label": "toggle password visibility", onClick: () => setShowPassword(!showPassword), edge: "end", children: showPassword ? _jsx(VisibilityOff, {}) : _jsx(Visibility, {}) }), _jsx(IconButton, { onClick: () => onCopy(password), edge: "end", children: _jsx(ContentCopyIcon, { fontSize: "small" }) })] }))
                                         } }) })] }), _jsx(TextField, { label: "URL", fullWidth: true, value: url, onChange: (e) => setField("URL", e.target.value), InputProps: {
                                 endAdornment: url ? (_jsx(InputAdornment, { position: "end", children: _jsx(Button, { variant: "text", size: "small", component: "a", href: url, target: "_blank", rel: "noreferrer", children: "Open" }) })) : undefined
-                            } }), _jsx(TextField, { label: "Notes", fullWidth: true, multiline: true, minRows: 3, value: notes, onChange: (e) => setField("Notes", e.target.value) })] }) }), _jsx(CardActions, { sx: { justifyContent: 'flex-end', p: 2 }, children: _jsx(Button, { onClick: onClose, children: "Close" }) })] }));
+                            } }), _jsx(TextField, { label: "Notes", fullWidth: true, multiline: true, minRows: 3, value: notes, onChange: (e) => setField("Notes", e.target.value) })] }) }), _jsxs(CardActions, { sx: { justifyContent: 'flex-end', p: 2, gap: 1 }, children: [_jsx(Button, { onClick: onClose, variant: "outlined", color: "inherit", children: "Close" }), _jsx(Button, { onClick: onSave, variant: "contained", color: "primary", children: "Save & Close" })] })] }));
 }

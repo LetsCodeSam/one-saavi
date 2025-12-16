@@ -130,6 +130,7 @@ export default function App() {
     }, [db, autoLockMins]);
     useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
     useEffect(() => () => stopClipboardTicker(), []);
+    const [dbVersion, setDbVersion] = useState(0);
     const [fileLastModified, setFileLastModified] = useState(0);
     /* --------- OPEN / SAVE --------- */
     async function doOpen() {
@@ -166,6 +167,7 @@ export default function App() {
             // Update our timestamp to match the new file we just wrote
             const newFile = await handle.getFile();
             setFileLastModified(newFile.lastModified);
+            setDbVersion(v => v + 1); // Refresh list to show accepted edits
             setDirty(false);
             setStatus("Saved");
         }
@@ -191,6 +193,7 @@ export default function App() {
             a.click();
             URL.revokeObjectURL(a.href);
             setDirty(false);
+            setDbVersion(v => v + 1);
             setStatus("Saved (download)");
         }
         catch (e) {
@@ -205,6 +208,7 @@ export default function App() {
             const keyBytes = keyFile ? await keyFile.arrayBuffer() : undefined;
             const opened = await openKdbx(pendingBytes, password, keyBytes);
             setDb(opened);
+            setDbVersion(0);
             setDirty(false);
             setSelectedGroupId(null);
             setOpenedEntryId(null);
@@ -237,7 +241,7 @@ export default function App() {
         }
         db.groups?.forEach((g) => search(g));
         return found || db.getDefaultGroup?.() || db.groups?.[0] || null;
-    }, [db]);
+    }, [db, dbVersion]);
     const groupTree = useMemo(() => {
         if (!rootGroup)
             return null;
@@ -250,7 +254,7 @@ export default function App() {
             };
         }
         return build(rootGroup);
-    }, [rootGroup]);
+    }, [rootGroup, dbVersion]);
     /* --------- ENTRIES / FILTER --------- */
     const entries = useMemo(() => {
         if (!db || !rootGroup)
@@ -280,7 +284,7 @@ export default function App() {
         else
             collectFromId(rootGroup, selectedGroupId);
         return out;
-    }, [db, rootGroup, selectedGroupId]);
+    }, [db, rootGroup, selectedGroupId, dbVersion]);
     const filteredEntries = useMemo(() => {
         const s = q.trim().toLowerCase();
         if (!s)
@@ -408,6 +412,7 @@ export default function App() {
             const newEntry = addNewEntry(db, rootGroup); // Adds to root group by default for now
             setOpenedEntryId(newEntry.uuid.id);
             markDirty();
+            setDbVersion(v => v + 1);
             setStatus("New entry added");
         }
         catch (e) {
@@ -454,7 +459,7 @@ export default function App() {
                                     width: { xs: '100%', sm: 400, md: 500 },
                                     boxSizing: 'border-box',
                                 }
-                            }, children: [_jsx(Toolbar, {}), _jsx(Box, { sx: { p: 2, height: '100%', overflowY: 'auto' }, children: selectedEntry && (_jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear })) })] })] })) : (_jsxs(Box, { sx: { textAlign: 'center', mt: 10, opacity: 0.6 }, children: [_jsx("h2", { children: "Open a KeePass database to start" }), _jsx(Typography, { variant: "caption", sx: {
+                            }, children: [_jsx(Toolbar, {}), _jsx(Box, { sx: { p: 2, height: '100%', overflowY: 'auto' }, children: selectedEntry && (_jsx(EntryView, { entry: selectedEntry, onChange: markDirty, onClose: () => { setOpenedEntryId(null); noteActivity(); }, onSave: async () => { await doSave(); setOpenedEntryId(null); noteActivity(); }, onCopy: copyAndClear })) })] })] })) : (_jsxs(Box, { sx: { textAlign: 'center', mt: 10, opacity: 0.6 }, children: [_jsx("h2", { children: "Open a KeePass database to start" }), _jsx(Typography, { variant: "caption", sx: {
                                 position: 'fixed',
                                 bottom: 20,
                                 left: 0,
