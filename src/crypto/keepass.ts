@@ -51,7 +51,6 @@ export async function createNewDb(password: string, name = "Saavi") {
   db.meta.historyMaxItems = 10;
   db.meta.historyMaxSize = 8 * 1024 * 1024; // 8 MB
 
-  // touch the db so it's in a consistent initial state
-  db.save();
+  // No need to save here, the caller handles serialization.
   return db;
 }
