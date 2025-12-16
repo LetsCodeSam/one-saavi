@@ -65,6 +65,16 @@ export default function App() {
   /* ---- iOS helper modal ---- */
   const [showIOSHelp, setShowIOSHelp] = useState(false);
 
+  /* ---- Local Vault Detection ---- */
+  const [hasLocalVault, setHasLocalVault] = useState(false);
+  useEffect(() => {
+    if (!hasFilePicker()) {
+      loadVaultBytes().then(res => {
+        if (res.bytes) setHasLocalVault(true);
+      });
+    }
+  }, []);
+
   /* --------- Auto-lock helpers --------- */
   function clearIdleTimer() {
     if (idleTimer.current != null) {
@@ -365,10 +375,10 @@ export default function App() {
         setHandle(null);
         setPendingBytes
         setUnlockOpen(true);
-        setStatus("Ready to unlock cached mobile vault");
+        setStatus("Resumed local copy. Use Menu > Download .kdbx to sync.");
         return;
       }
-      setStatus("No previous vault remembered");
+      setStatus("No previous vault found on device");
     } catch (e: any) {
       setStatus(e?.message || "Reopen failed");
     }
@@ -645,8 +655,27 @@ export default function App() {
             </Drawer>
           </>
         ) : (
-          <Box sx={{ textAlign: 'center', mt: 10, opacity: 0.6 }}>
+          <Box sx={{ textAlign: 'center', mt: 10, opacity: 0.6, p: 2 }}>
             <h2>Open a KeePass database to start</h2>
+
+            {/* Resume Button for Mobile/Cached Sessions */}
+            {hasLocalVault && (
+              <Box sx={{ my: 4, p: 2, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 2, bgcolor: 'rgba(255,255,255,0.05)' }}>
+                <Typography variant="h6" gutterBottom>Session Found</Typography>
+                <Typography variant="body2" sx={{ mb: 2, opacity: 0.8 }}>
+                  You have unsaved changes or a cached vault on this device.
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  size="large"
+                  onClick={reopenLast}
+                  fullWidth
+                >
+                  Resume / Unlock Vault
+                </Button>
+              </Box>
+            )}
 
             <Typography
               variant="caption"
