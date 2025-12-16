@@ -27,7 +27,8 @@ export async function openKdbx(kdbxBytes: ArrayBuffer, password: string, keyFile
   return kdbxweb.Kdbx.load(kdbxBytes, creds);
 }
 export async function saveKdbx(db: kdbxweb.Kdbx) {
-  try { db.header.setKdf("Argon2id"); } catch {}
+  // We rely on default AES-256 KDF because Argon2 requires extra WASM assets
+  // that are not currently bundled.
   return db.save();
 }
 
