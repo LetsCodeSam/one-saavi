@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ThemeProvider, useTheme } from "@mui/material/styles";
-import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl, useMediaQuery, IconButton, Menu, Divider, Typography } from "@mui/material";
+import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl, useMediaQuery, IconButton, Menu, Divider, Typography, Drawer, Toolbar } from "@mui/material";
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
@@ -547,16 +547,31 @@ export default function App() {
                 onOpen={(id) => { setOpenedEntryId(id); noteActivity(); }}
               />
             </Box>
-            {selectedEntry && (
-              <Box sx={{ mt: 3, p: 2, bgcolor: 'background.paper', borderRadius: 2 }}>
-                <EntryView
-                  entry={selectedEntry}
-                  onChange={markDirty}
-                  onClose={() => { setOpenedEntryId(null); noteActivity(); }}
-                  onCopy={copyAndClear}
-                />
+
+            <Drawer
+              anchor="right"
+              open={!!selectedEntry}
+              onClose={() => { setOpenedEntryId(null); noteActivity(); }}
+              sx={{
+                zIndex: (theme) => theme.zIndex.drawer,
+                '& .MuiDrawer-paper': {
+                  width: { xs: '100%', sm: 400, md: 500 },
+                  boxSizing: 'border-box',
+                }
+              }}
+            >
+              <Toolbar />
+              <Box sx={{ p: 2, height: '100%', overflowY: 'auto' }}>
+                {selectedEntry && (
+                  <EntryView
+                    entry={selectedEntry}
+                    onChange={markDirty}
+                    onClose={() => { setOpenedEntryId(null); noteActivity(); }}
+                    onCopy={copyAndClear}
+                  />
+                )}
               </Box>
-            )}
+            </Drawer>
           </>
         ) : (
           <Box sx={{ textAlign: 'center', mt: 10, opacity: 0.6 }}>
