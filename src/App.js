@@ -3,8 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ThemeProvider } from "@mui/material/styles";
 import { Button, Box, TextField, Select, MenuItem, FormControl, useMediaQuery, IconButton, Menu, Divider, Typography, Drawer, Toolbar } from "@mui/material";
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import AddIcon from '@mui/icons-material/Add';
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
-import { openKdbx, saveKdbx, createNewDb } from "./crypto/keepass";
+import { openKdbx, saveKdbx, addNewEntry, createNewDb } from "./crypto/keepass";
 import EntryList from "./ui/EntryList";
 import EntryView from "./ui/EntryView";
 import GroupTree from "./ui/GroupTree";
@@ -129,6 +130,7 @@ export default function App() {
     }, [db, autoLockMins]);
     useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
     useEffect(() => () => stopClipboardTicker(), []);
+    const [fileLastModified, setFileLastModified] = useState(0);
     /* --------- OPEN / SAVE --------- */
     async function doOpen() {
         try {
@@ -136,6 +138,7 @@ export default function App() {
             await ensurePerm(h, "read"); // Don't ask for write until we save
             const f = await h.getFile();
             setFileName(f.name);
+            setFileLastModified(f.lastModified);
             setHandle(h);
             await rememberHandle(h);
             const bytes = await readBytes(h);
@@ -151,8 +154,18 @@ export default function App() {
             return;
         try {
             await ensurePerm(handle, "readwrite"); // Ask for permission now
+            // Stale Check
+            const fileOnDisk = await handle.getFile();
+            if (fileOnDisk.lastModified > fileLastModified) {
+                alert("CRITICAL: The file has been modified by another app (e.g., OneDrive/Dropbox sync) since you opened it.\n\nSaving now would OVERWRITE those changes.\n\nPlease reload the file and re-apply your changes.");
+                setStatus("Save blocked: File changed externally");
+                return;
+            }
             const out = await saveKdbx(db);
             await writeBytes(handle, out);
+            // Update our timestamp to match the new file we just wrote
+            const newFile = await handle.getFile();
+            setFileLastModified(newFile.lastModified);
             setDirty(false);
             setStatus("Saved");
         }
@@ -388,6 +401,19 @@ export default function App() {
             setStatus(e?.message || "Create failed");
         }
     }
+    function handleAddEntry() {
+        if (!db)
+            return;
+        try {
+            const newEntry = addNewEntry(db, rootGroup); // Adds to root group by default for now
+            setOpenedEntryId(newEntry.uuid.id);
+            markDirty();
+            setStatus("New entry added");
+        }
+        catch (e) {
+            setStatus("Failed to add entry");
+        }
+    }
     /* ---------------- UI ---------------- */
     /* ---------------- UI ---------------- */
     // Responsive Helpers
@@ -400,7 +426,7 @@ export default function App() {
                                     const file = e.target.files?.[0];
                                     if (file)
                                         await handleMobileFile(file);
-                                } })] })), _jsx(Button, { color: "inherit", onClick: reopenLast, children: "Recents" }), _jsx(Button, { color: "inherit", onClick: createNewVault, children: "New" }), hasFilePicker() ? (_jsx(Button, { color: "inherit", onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" })) : (_jsx(Button, { color: "inherit", onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As" })), db && _jsx(Button, { color: "inherit", onClick: () => lockNow("Locked manually"), children: "Lock" }), canInstall && (_jsx(Button, { color: "secondary", variant: "contained", onClick: async () => {
+                                } })] })), _jsx(Button, { color: "inherit", onClick: reopenLast, children: "Recents" }), _jsx(Button, { color: "inherit", onClick: createNewVault, children: "New" }), hasFilePicker() ? (_jsx(Button, { color: "inherit", onClick: doSave, disabled: !db || !handle || !dirty, children: "Save" })) : (_jsx(Button, { color: "inherit", onClick: saveAsDownload, disabled: !db || !dirty, children: "Save As" })), db && _jsx(Button, { color: "inherit", onClick: handleAddEntry, startIcon: _jsx(AddIcon, {}), children: "Add Entry" }), db && _jsx(Button, { color: "inherit", onClick: () => lockNow("Locked manually"), children: "Lock" }), canInstall && (_jsx(Button, { color: "secondary", variant: "contained", onClick: async () => {
                             const res = await triggerInstall();
                             if (res === "accepted")
                                 setStatus("App installed");
@@ -409,7 +435,7 @@ export default function App() {
                                             const file = e.target.files?.[0];
                                             if (file)
                                                 await handleMobileFile(file);
-                                        } })] })), _jsx(MenuItem, { onClick: () => { handleMenuClose(); reopenLast(); }, children: "Recents" }), _jsx(MenuItem, { onClick: () => { handleMenuClose(); createNewVault(); }, children: "New Vault" }), _jsx(Divider, {}), hasFilePicker() ? (_jsx(MenuItem, { onClick: () => { handleMenuClose(); doSave(); }, disabled: !db || !handle || !dirty, children: "Save" })) : (_jsx(MenuItem, { onClick: () => { handleMenuClose(); saveAsDownload(); }, disabled: !db || !dirty, children: "Save As" })), db && (_jsx(MenuItem, { onClick: () => { handleMenuClose(); lockNow("Locked manually"); }, children: "Lock Vault" })), canInstall && (_jsx(MenuItem, { onClick: async () => {
+                                        } })] })), _jsx(MenuItem, { onClick: () => { handleMenuClose(); reopenLast(); }, children: "Recents" }), _jsx(MenuItem, { onClick: () => { handleMenuClose(); createNewVault(); }, children: "New Vault" }), _jsx(Divider, {}), hasFilePicker() ? (_jsx(MenuItem, { onClick: () => { handleMenuClose(); doSave(); }, disabled: !db || !handle || !dirty, children: "Save" })) : (_jsx(MenuItem, { onClick: () => { handleMenuClose(); saveAsDownload(); }, disabled: !db || !dirty, children: "Save As" })), db && (_jsx(MenuItem, { onClick: () => { handleMenuClose(); handleAddEntry(); }, children: "Add Entry" })), db && (_jsx(MenuItem, { onClick: () => { handleMenuClose(); lockNow("Locked manually"); }, children: "Lock Vault" })), canInstall && (_jsx(MenuItem, { onClick: async () => {
                                     handleMenuClose();
                                     const res = await triggerInstall();
                                     if (res === "accepted")

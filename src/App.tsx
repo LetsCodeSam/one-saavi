@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ThemeProvider, useTheme } from "@mui/material/styles";
 import { Button, Box, TextField, Select, MenuItem, InputLabel, FormControl, useMediaQuery, IconButton, Menu, Divider, Typography, Drawer, Toolbar } from "@mui/material";
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import AddIcon from '@mui/icons-material/Add';
 
 import { pickKdbx, ensurePerm, readBytes, writeBytes } from "./fs/fileAccess";
 import { openKdbx, saveKdbx, addNewEntry, createNewDb } from "./crypto/keepass";
@@ -135,6 +136,8 @@ export default function App() {
   useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
   useEffect(() => () => stopClipboardTicker(), []);
 
+  const [fileLastModified, setFileLastModified] = useState<number>(0);
+
   /* --------- OPEN / SAVE --------- */
   async function doOpen() {
     try {
@@ -142,6 +145,7 @@ export default function App() {
       await ensurePerm(h, "read"); // Don't ask for write until we save
       const f = await h.getFile();
       setFileName(f.name);
+      setFileLastModified(f.lastModified);
       setHandle(h);
       await rememberHandle(h);
       const bytes = await readBytes(h);
@@ -151,12 +155,27 @@ export default function App() {
       setStatus(e?.message || "Open failed");
     }
   }
+
   async function doSave() {
     if (READ_ONLY || !db || !handle) return;
     try {
       await ensurePerm(handle, "readwrite"); // Ask for permission now
+
+      // Stale Check
+      const fileOnDisk = await handle.getFile();
+      if (fileOnDisk.lastModified > fileLastModified) {
+        alert("CRITICAL: The file has been modified by another app (e.g., OneDrive/Dropbox sync) since you opened it.\n\nSaving now would OVERWRITE those changes.\n\nPlease reload the file and re-apply your changes.");
+        setStatus("Save blocked: File changed externally");
+        return;
+      }
+
       const out = await saveKdbx(db);
       await writeBytes(handle, out);
+
+      // Update our timestamp to match the new file we just wrote
+      const newFile = await handle.getFile();
+      setFileLastModified(newFile.lastModified);
+
       setDirty(false);
       setStatus("Saved");
     } catch (e: any) {
@@ -381,6 +400,18 @@ export default function App() {
     }
   }
 
+  function handleAddEntry() {
+    if (!db) return;
+    try {
+      const newEntry = addNewEntry(db, rootGroup); // Adds to root group by default for now
+      setOpenedEntryId(newEntry.uuid.id);
+      markDirty();
+      setStatus("New entry added");
+    } catch (e: any) {
+      setStatus("Failed to add entry");
+    }
+  }
+
   /* ---------------- UI ---------------- */
   /* ---------------- UI ---------------- */
   // Responsive Helpers
@@ -419,6 +450,8 @@ export default function App() {
           ) : (
             <Button color="inherit" onClick={saveAsDownload} disabled={!db || !dirty}>Save As</Button>
           )}
+
+          {db && <Button color="inherit" onClick={handleAddEntry} startIcon={<AddIcon />}>Add Entry</Button>}
 
           {db && <Button color="inherit" onClick={() => lockNow("Locked manually")}>Lock</Button>}
 
@@ -462,6 +495,10 @@ export default function App() {
               <MenuItem onClick={() => { handleMenuClose(); doSave(); }} disabled={!db || !handle || !dirty}>Save</MenuItem>
             ) : (
               <MenuItem onClick={() => { handleMenuClose(); saveAsDownload(); }} disabled={!db || !dirty}>Save As</MenuItem>
+            )}
+
+            {db && (
+              <MenuItem onClick={() => { handleMenuClose(); handleAddEntry(); }}>Add Entry</MenuItem>
             )}
 
             {db && (
