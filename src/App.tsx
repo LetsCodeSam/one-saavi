@@ -416,26 +416,43 @@ export default function App() {
     try {
       const pw = window.prompt("Set a master password for the new vault:");
       if (!pw) return;
+
+      // Desktop: Get handle FIRST to satisfy "user gesture" requirement
+      let newHandle: FileSystemFileHandle | null = null;
+      if (hasFilePicker()) {
+        try {
+          newHandle = await (window as any).showSaveFilePicker({
+            suggestedName: "new-vault.kdbx",
+            types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
+          });
+        } catch (pickerErr) {
+          // User cancelled picker
+          return;
+        }
+      }
+
+      // Now do the expensive crypto work
+      setStatus("Creating vault...");
       const newDb = await createNewDb(pw, "Saavi");
+
       setDb(newDb);
-      setDirty(true);
       setSelectedGroupId(null);
       setOpenedEntryId(null);
-      if (hasFilePicker()) {
-        const h = await (window as any).showSaveFilePicker({
-          suggestedName: "new-vault.kdbx",
-          types: [{ description: "KeePass Database", accept: { "application/x-keepass2": [".kdbx"] } }],
-        });
-        await ensurePerm(h, "readwrite");
-        const out = await saveKdbx(newDb);
-        await writeBytes(h, out);
-        setHandle(h);
-        setFileName("new-vault.kdbx");
+
+      const out = await saveKdbx(newDb);
+
+      if (newHandle) {
+        // We already have the handle from step 1
+        await ensurePerm(newHandle, "readwrite");
+        await writeBytes(newHandle, out);
+
+        setHandle(newHandle);
+        setFileName(await (newHandle as any).name || "new-vault.kdbx");
         setDirty(false);
-        await rememberHandle(h);
+        await rememberHandle(newHandle);
         setStatus("New vault created");
       } else {
-        const out = await saveKdbx(newDb);
+        // Mobile / No Picker Download
         const a = document.createElement("a");
         a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
         a.download = "new-vault.kdbx";
@@ -445,6 +462,7 @@ export default function App() {
         setStatus("New vault created (downloaded)");
       }
     } catch (e: any) {
+      console.error(e);
       setStatus(e?.message || "Create failed");
     }
   }
