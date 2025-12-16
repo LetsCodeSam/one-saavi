@@ -158,29 +158,37 @@ export default function App() {
   }
 
   async function doSave() {
-    if (READ_ONLY || !db || !handle) return;
+    if (READ_ONLY || !db) return; // Allow save without handle (for mobile/local)
     try {
-      await ensurePerm(handle, "readwrite"); // Ask for permission now
+      if (handle) {
+        await ensurePerm(handle, "readwrite"); // Ask for permission now
 
-      // Stale Check
-      const fileOnDisk = await handle.getFile();
-      if (fileOnDisk.lastModified > fileLastModified) {
-        alert("CRITICAL: The file has been modified by another app (e.g., OneDrive/Dropbox sync) since you opened it.\n\nSaving now would OVERWRITE those changes.\n\nPlease reload the file and re-apply your changes.");
-        setStatus("Save blocked: File changed externally");
-        return;
+        // Stale Check
+        const fileOnDisk = await handle.getFile();
+        if (fileOnDisk.lastModified > fileLastModified) {
+          alert("CRITICAL: The file has been modified by another app (e.g., OneDrive/Dropbox sync) since you opened it.\n\nSaving now would OVERWRITE those changes.\n\nPlease reload the file and re-apply your changes.");
+          setStatus("Save blocked: File changed externally");
+          return;
+        }
+
+        const out = await saveKdbx(db);
+        await writeBytes(handle, out);
+
+        // Update our timestamp to match the new file we just wrote
+        const newFile = await handle.getFile();
+        setFileLastModified(newFile.lastModified);
+        setStatus("Saved");
+      } else {
+        // Mobile / Local Save
+        const out = await saveKdbx(db);
+        await saveVaultBytes(out, fileName || "vault.kdbx");
+        setStatus("Saved to App Cache");
       }
 
-      const out = await saveKdbx(db);
-      await writeBytes(handle, out);
-
-      // Update our timestamp to match the new file we just wrote
-      const newFile = await handle.getFile();
-      setFileLastModified(newFile.lastModified);
       setDbVersion(v => v + 1); // Refresh list to show accepted edits
-
       setDirty(false);
-      setStatus("Saved");
     } catch (e: any) {
+      console.error(e);
       setStatus(e?.message || "Save failed");
     }
   }
@@ -516,7 +524,10 @@ export default function App() {
             {hasFilePicker() ? (
               <MenuItem onClick={() => { handleMenuClose(); doSave(); }} disabled={!db || !handle || !dirty}>Save</MenuItem>
             ) : (
-              <MenuItem onClick={() => { handleMenuClose(); saveAsDownload(); }} disabled={!db || !dirty}>Save As</MenuItem>
+              <>
+                <MenuItem onClick={() => { handleMenuClose(); doSave(); }} disabled={!db || !dirty}>Save (Local)</MenuItem>
+                <MenuItem onClick={() => { handleMenuClose(); saveAsDownload(); }} disabled={!db || !dirty}>Download .kdbx</MenuItem>
+              </>
             )}
 
             {db && (
