@@ -447,7 +447,9 @@ export default function App() {
         await writeBytes(newHandle, out);
 
         setHandle(newHandle);
-        setFileName(await (newHandle as any).name || "new-vault.kdbx");
+        const f = await newHandle.getFile();
+        setFileName(f.name || "new-vault.kdbx");
+        setFileLastModified(f.lastModified);
         setDirty(false);
         await rememberHandle(newHandle);
         setStatus("New vault created");
