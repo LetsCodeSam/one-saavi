@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardHeader, CardContent, CardActions, TextField, Button, IconButton, InputAdornment, Grid, Stack, Divider, } from "@mui/material";
 import CloseIcon from '@mui/icons-material/Close';
 import Visibility from '@mui/icons-material/Visibility';
@@ -13,32 +13,49 @@ function unwrap(val) {
 export default function EntryView({ entry, onChange, onClose, onSave, onCopy }) {
     // We need local state to handle editing fields properly
     const [showPassword, setShowPassword] = useState(false);
-    const [dirty, setDirty] = useState(false);
+    // Local state for form fields to ensure instant UI feedback (controlled components)
+    const [title, setTitle] = useState("");
+    const [username, setUsername] = useState("");
+    const [password, setPassword] = useState("");
+    const [url, setUrl] = useState("");
+    const [notes, setNotes] = useState("");
+    const getField = (key) => {
+        const v = entry?.fields?.get ? entry.fields.get(key) : entry?.fields?.[key];
+        return unwrap(v);
+    };
+    // Sync state from entry when entry changes
+    useEffect(() => {
+        setTitle(getField("Title"));
+        setUsername(getField("UserName"));
+        setPassword(getField("Password"));
+        setUrl(getField("URL"));
+        setNotes(getField("Notes"));
+    }, [entry]);
     // Helper to sync local state back to KdbxEntry
     const setField = (key, val) => {
+        // 1. Update local state immediately
+        if (key === "Title")
+            setTitle(val);
+        if (key === "UserName")
+            setUsername(val);
+        if (key === "Password")
+            setPassword(val);
+        if (key === "URL")
+            setUrl(val);
+        if (key === "Notes")
+            setNotes(val);
+        // 2. Update the underlying KDBX object
         if (!entry.fields)
             return;
-        // rough heuristic: if we have a proper minimal Kdbx structure
         if (typeof entry.fields.set === 'function') {
-            // ProtectedValue vs String handling is tricky in raw JS KdbxWeb
-            // For now we just set string. 
-            // Real implementation usually needs to check if existing is ProtectedValue.
             entry.fields.set(key, val);
         }
         else {
             entry.fields[key] = val;
         }
+        // 3. Mark app as dirty
         onChange();
     };
-    const getField = (key) => {
-        const v = entry?.fields?.get ? entry.fields.get(key) : entry?.fields?.[key];
-        return unwrap(v);
-    };
-    const title = getField("Title");
-    const username = getField("UserName");
-    const password = getField("Password");
-    const url = getField("URL");
-    const notes = getField("Notes");
     return (_jsxs(Card, { elevation: 3, children: [_jsx(CardHeader, { title: "Entry Details", action: _jsx(IconButton, { onClick: onClose, children: _jsx(CloseIcon, {}) }) }), _jsx(Divider, {}), _jsx(CardContent, { children: _jsxs(Stack, { spacing: 2, children: [_jsx(TextField, { label: "Title", fullWidth: true, variant: "outlined", value: title, onChange: (e) => setField("Title", e.target.value) }), _jsxs(Grid, { container: true, spacing: 2, children: [_jsx(Grid, { size: { xs: 12, md: 6 }, children: _jsx(TextField, { label: "Username", fullWidth: true, value: username, onChange: (e) => setField("UserName", e.target.value), InputProps: {
                                             endAdornment: (_jsx(InputAdornment, { position: "end", children: _jsx(IconButton, { onClick: () => onCopy(username), edge: "end", children: _jsx(ContentCopyIcon, { fontSize: "small" }) }) }))
                                         } }) }), _jsx(Grid, { size: { xs: 12, md: 6 }, children: _jsx(TextField, { label: "Password", fullWidth: true, type: showPassword ? 'text' : 'password', value: password, onChange: (e) => setField("Password", e.target.value), InputProps: {

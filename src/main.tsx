@@ -12,7 +12,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 // src/main.tsx (bottom)
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    const url = new URL('sw.js', import.meta.env.BASE_URL).toString();
+    const url = new URL('sw.js', new URL(import.meta.env.BASE_URL, window.location.origin)).href;
     navigator.serviceWorker.register(url).catch(console.error);
   });
 }

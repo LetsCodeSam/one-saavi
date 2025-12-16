@@ -37,7 +37,7 @@ export default function App() {
   const [status, setStatus] = useState("Ready");
   const [fileName, setFileName] = useState("");
   const [dirty, setDirty] = useState(false);
-  const READ_ONLY = true; // toggle
+  const READ_ONLY = false; // toggle
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [openedEntryId, setOpenedEntryId] = useState<string | null>(null);

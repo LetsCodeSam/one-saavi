@@ -35,7 +35,7 @@ export default function App() {
     const [status, setStatus] = useState("Ready");
     const [fileName, setFileName] = useState("");
     const [dirty, setDirty] = useState(false);
-    const READ_ONLY = true; // toggle
+    const READ_ONLY = false; // toggle
     const [selectedGroupId, setSelectedGroupId] = useState(null);
     const [openedEntryId, setOpenedEntryId] = useState(null);
     const [unlockOpen, setUnlockOpen] = useState(false);
@@ -406,16 +406,35 @@ export default function App() {
         }
     }
     function handleAddEntry() {
-        if (!db)
+        if (!db || !rootGroup)
             return;
         try {
-            const newEntry = addNewEntry(db, rootGroup); // Adds to root group by default for now
+            // Find target group (default to root)
+            let targetGroup = rootGroup;
+            if (selectedGroupId && selectedGroupId !== rootGroup.uuid?.id) {
+                // Recursive find
+                const findG = (g) => {
+                    if (g.uuid?.id === selectedGroupId)
+                        return g;
+                    for (const sub of (g.groups || [])) {
+                        const found = findG(sub);
+                        if (found)
+                            return found;
+                    }
+                    return null;
+                };
+                const found = findG(rootGroup);
+                if (found)
+                    targetGroup = found;
+            }
+            const newEntry = addNewEntry(db, targetGroup);
             setOpenedEntryId(newEntry.uuid.id);
             markDirty();
             setDbVersion(v => v + 1);
             setStatus("New entry added");
         }
         catch (e) {
+            console.error(e);
             setStatus("Failed to add entry");
         }
     }
