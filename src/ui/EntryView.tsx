@@ -34,33 +34,48 @@ function unwrap(val: any): string {
 export default function EntryView({ entry, onChange, onClose, onSave, onCopy }: Props) {
   // We need local state to handle editing fields properly
   const [showPassword, setShowPassword] = useState(false);
-  const [dirty, setDirty] = useState(false);
 
-  // Helper to sync local state back to KdbxEntry
-  const setField = (key: string, val: string) => {
-    if (!entry.fields) return;
-    // rough heuristic: if we have a proper minimal Kdbx structure
-    if (typeof entry.fields.set === 'function') {
-      // ProtectedValue vs String handling is tricky in raw JS KdbxWeb
-      // For now we just set string. 
-      // Real implementation usually needs to check if existing is ProtectedValue.
-      entry.fields.set(key, val);
-    } else {
-      entry.fields[key] = val;
-    }
-    onChange();
-  };
+  // Local state for form fields to ensure instant UI feedback (controlled components)
+  const [title, setTitle] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [url, setUrl] = useState("");
+  const [notes, setNotes] = useState("");
 
   const getField = (key: string) => {
     const v = entry?.fields?.get ? entry.fields.get(key) : entry?.fields?.[key];
     return unwrap(v);
   };
 
-  const title = getField("Title");
-  const username = getField("UserName");
-  const password = getField("Password");
-  const url = getField("URL");
-  const notes = getField("Notes");
+  // Sync state from entry when entry changes
+  useEffect(() => {
+    setTitle(getField("Title"));
+    setUsername(getField("UserName"));
+    setPassword(getField("Password"));
+    setUrl(getField("URL"));
+    setNotes(getField("Notes"));
+  }, [entry]);
+
+  // Helper to sync local state back to KdbxEntry
+  const setField = (key: string, val: string) => {
+    // 1. Update local state immediately
+    if (key === "Title") setTitle(val);
+    if (key === "UserName") setUsername(val);
+    if (key === "Password") setPassword(val);
+    if (key === "URL") setUrl(val);
+    if (key === "Notes") setNotes(val);
+
+    // 2. Update the underlying KDBX object
+    if (!entry.fields) return;
+    if (typeof entry.fields.set === 'function') {
+      entry.fields.set(key, val);
+    } else {
+      entry.fields[key] = val;
+    }
+
+    // 3. Mark app as dirty
+    onChange();
+  };
 
   return (
     <Card elevation={3}>

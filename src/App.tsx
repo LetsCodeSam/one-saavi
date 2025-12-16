@@ -405,14 +405,31 @@ export default function App() {
   }
 
   function handleAddEntry() {
-    if (!db) return;
+    if (!db || !rootGroup) return;
     try {
-      const newEntry = addNewEntry(db, rootGroup); // Adds to root group by default for now
+      // Find target group (default to root)
+      let targetGroup = rootGroup;
+      if (selectedGroupId && selectedGroupId !== rootGroup.uuid?.id) {
+        // Recursive find
+        const findG = (g: any): any => {
+          if (g.uuid?.id === selectedGroupId) return g;
+          for (const sub of (g.groups || [])) {
+            const found = findG(sub);
+            if (found) return found;
+          }
+          return null;
+        }
+        const found = findG(rootGroup);
+        if (found) targetGroup = found;
+      }
+
+      const newEntry = addNewEntry(db, targetGroup);
       setOpenedEntryId(newEntry.uuid.id);
       markDirty();
       setDbVersion(v => v + 1);
       setStatus("New entry added");
     } catch (e: any) {
+      console.error(e);
       setStatus("Failed to add entry");
     }
   }
