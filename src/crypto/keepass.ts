@@ -39,6 +39,9 @@ export async function createNewDb(password: string, name = "Saavi") {
   );
   const db = kdbxweb.Kdbx.create(creds, name);
 
+  // Force AES-256 KDF to avoid Argon2 requirements (WASM)
+  db.header.setKdf("Aes");
+
   // Ensure a sensible default group exists and is named consistently
   const root = db.getDefaultGroup?.() || db.groups?.[0];
   if (root) {
