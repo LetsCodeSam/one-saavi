@@ -536,7 +536,7 @@ export default function App() {
             ) : (
               <>
                 <MenuItem onClick={() => { handleMenuClose(); doSave(); }} disabled={!db || !dirty}>Save (Local)</MenuItem>
-                <MenuItem onClick={() => { handleMenuClose(); saveAsDownload(); }} disabled={!db || !dirty}>Download .kdbx</MenuItem>
+                <MenuItem onClick={() => { handleMenuClose(); saveAsDownload(); }} disabled={!db}>Download .kdbx</MenuItem>
               </>
             )}
 
