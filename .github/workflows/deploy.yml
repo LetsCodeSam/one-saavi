@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/cleanup-modernize
+      - feature/write-capabilities
   workflow_dispatch:
 
 permissions:
