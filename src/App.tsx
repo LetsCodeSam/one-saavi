@@ -41,6 +41,7 @@ export default function App() {
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [openedEntryId, setOpenedEntryId] = useState<string | null>(null);
+  const [modifiedIds, setModifiedIds] = useState<Set<string>>(new Set());
 
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [pendingBytes, setPendingBytes] = useState<ArrayBuffer | null>(null);
@@ -191,7 +192,7 @@ export default function App() {
       } else {
         // Mobile / Local Save
         const out = await saveKdbx(db);
-        await saveVaultBytes(out, fileName || "vault.kdbx");
+        await saveVaultBytes(out, fileName || "vault.kdbx", Array.from(modifiedIds));
         setStatus("Saved to App Cache");
       }
 
@@ -265,15 +266,19 @@ export default function App() {
   const groupTree: GroupNode | null = useMemo(() => {
     if (!rootGroup) return null;
     function build(g: any): GroupNode {
+      const children = (g.groups || []).map((x: any) => build(x));
+      const selfModified = g.entries?.some((e: any) => modifiedIds.has(e.uuid?.id));
+      const childModified = children.some((c: any) => c.hasModified);
       return {
         id: g.uuid?.id ?? crypto.randomUUID(),
         name: unwrap(g.name) || "(group)",
         count: g.entries?.length ?? 0,
-        children: (g.groups || []).map((x: any) => build(x)),
+        children,
+        hasModified: selfModified || childModified
       };
     }
     return build(rootGroup);
-  }, [rootGroup, dbVersion]);
+  }, [rootGroup, dbVersion, modifiedIds]);
 
   /* --------- ENTRIES / FILTER --------- */
   const entries = useMemo(() => {
@@ -345,9 +350,16 @@ export default function App() {
     noteActivity();
   }
 
-  function markDirty() {
+  function markDirty(id?: string) {
     if (READ_ONLY) return;
     setDirty(true);
+    if (id) {
+      setModifiedIds(s => {
+        const n = new Set(s);
+        n.add(id);
+        return n;
+      });
+    }
     setStatus("Edited");
     noteActivity();
   }
@@ -374,6 +386,7 @@ export default function App() {
         setFileName(rec.name);
         setHandle(null);
         setPendingBytes(rec.bytes);
+        if (rec.modifiedIds) setModifiedIds(new Set(rec.modifiedIds));
         setUnlockOpen(true);
         setStatus("Resumed local copy. Use Menu > Download .kdbx to sync.");
         return;
@@ -443,7 +456,7 @@ export default function App() {
 
       const newEntry = addNewEntry(db, targetGroup);
       setOpenedEntryId(newEntry.uuid.id);
-      markDirty();
+      markDirty(newEntry.uuid.id);
       setDbVersion(v => v + 1);
       setStatus("New entry added");
     } catch (e: any) {
@@ -611,6 +624,7 @@ export default function App() {
             tree={groupTree}
             selectedId={selectedGroupId}
             onSelect={(id) => { setSelectedGroupId(id); noteActivity(); }}
+            modifiedIds={modifiedIds}
           />
         ) : null}
       >
@@ -625,6 +639,7 @@ export default function App() {
                 onReveal={revealPassword}
                 onCopy={copyAndClear}
                 onOpen={(id) => { setOpenedEntryId(id); noteActivity(); }}
+                modifiedIds={modifiedIds}
               />
             </Box>
 
@@ -645,7 +660,7 @@ export default function App() {
                 {selectedEntry && (
                   <EntryView
                     entry={selectedEntry}
-                    onChange={markDirty}
+                    onChange={() => markDirty(selectedEntry.uuid)}
                     onClose={() => { setOpenedEntryId(null); noteActivity(); }}
                     onSave={async () => { await doSave(); setOpenedEntryId(null); noteActivity(); }}
                     onCopy={copyAndClear}

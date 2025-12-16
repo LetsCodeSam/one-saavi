@@ -20,6 +20,7 @@ export type GroupNode = {
   name: string;
   count: number;        // shallow entry count
   children: GroupNode[];
+  hasModified?: boolean; // NEW: true if this group or children contain modified entries
 };
 
 type Props = {
@@ -27,6 +28,7 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   defaultCollapsed?: boolean; // default true
+  modifiedIds?: Set<string>; // (Not strictly used here if we pre-calculate hasModified in App.tsx, but good for interface)
 };
 
 export default function GroupTree({ tree, selectedId, onSelect, defaultCollapsed = true }: Props) {
@@ -59,6 +61,7 @@ export default function GroupTree({ tree, selectedId, onSelect, defaultCollapsed
     const hasKids = node.children.length > 0;
     const isOpen = open.has(node.id);
     const isSelected = selectedId === node.id;
+    const isModified = node.hasModified;
 
     return (
       <>
@@ -68,13 +71,15 @@ export default function GroupTree({ tree, selectedId, onSelect, defaultCollapsed
           sx={{ pl: depth * 2 + 2, py: 0.5 }}
         >
           <ListItemIcon sx={{ minWidth: 32 }}>
-            {isOpen ? <FolderOpenIcon color="primary" fontSize="small" /> : <FolderIcon color="disabled" fontSize="small" />}
+            <Badge variant="dot" color="warning" invisible={!isModified}>
+              {isOpen ? <FolderOpenIcon color={isModified ? "warning" : "primary"} fontSize="small" /> : <FolderIcon color={isModified ? "warning" : "disabled"} fontSize="small" />}
+            </Badge>
           </ListItemIcon>
 
           <ListItemText
             primary={node.name}
             secondary={node.count > 0 ? `${node.count} items` : null}
-            primaryTypographyProps={{ fontSize: '0.9rem', fontWeight: isSelected ? 600 : 400 }}
+            primaryTypographyProps={{ fontSize: '0.9rem', fontWeight: isSelected ? 600 : 400, color: isModified ? 'warning.main' : 'inherit' }}
             secondaryTypographyProps={{ fontSize: '0.75rem' }}
           />
 

@@ -12,24 +12,28 @@ async function db() {
 }
 
 // Save encrypted bytes (ArrayBuffer) and a display name
-export async function saveVaultBytes(bytes: ArrayBuffer, name: string) {
+export async function saveVaultBytes(bytes: ArrayBuffer, name: string, modifiedIds?: string[]) {
   const d = await db();
   // Store as Uint8Array for IDB
   await d.put(STORE, new Uint8Array(bytes), "bytes");
   await d.put(STORE, name, "name");
+  if (modifiedIds) {
+    await d.put(STORE, modifiedIds, "modifiedIds");
+  }
 }
 
 // Load encrypted bytes and name
-export async function loadVaultBytes(): Promise<{ bytes: ArrayBuffer | null; name: string | null }> {
+export async function loadVaultBytes(): Promise<{ bytes: ArrayBuffer | null; name: string | null; modifiedIds: string[] | null }> {
   const d = await db();
   const arr = (await d.get(STORE, "bytes")) as Uint8Array | undefined;
   const name = (await d.get(STORE, "name")) as string | undefined;
+  const ids = (await d.get(STORE, "modifiedIds")) as string[] | undefined;
 
-  if (!arr) return { bytes: null, name: name ?? null };
+  if (!arr) return { bytes: null, name: name ?? null, modifiedIds: null };
 
   // Reconstitute into a real ArrayBuffer (not ArrayBufferLike)
   const out = new ArrayBuffer(arr.byteLength);
   new Uint8Array(out).set(arr);
 
-  return { bytes: out, name: name ?? null };
+  return { bytes: out, name: name ?? null, modifiedIds: ids ?? null };
 }
