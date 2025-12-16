@@ -214,12 +214,26 @@ export default function App() {
     if (!db) return;
     try {
       const out = await saveKdbx(db);
+
+      // Fix double extension if present
+      let name = fileName || "vault";
+      if (!name.toLowerCase().endsWith(".kdbx")) name += ".kdbx";
+
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
-      a.download = (fileName || "vault") + ".kdbx";
+      a.download = name;
       a.click();
       URL.revokeObjectURL(a.href);
+
+      // Clear dirty state and local modified markers since we exported a clean version
       setDirty(false);
+      setModifiedIds(new Set());
+
+      // Also update local cache to be "clean" so Resume doesn't show "Edited" tags
+      if (!hasFilePicker()) {
+        await saveVaultBytes(out, name, []);
+      }
+
       setDbVersion(v => v + 1);
       setStatus("Saved (download)");
     } catch (e: any) {
