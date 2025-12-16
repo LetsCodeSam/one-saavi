@@ -136,6 +136,7 @@ export default function App() {
   useEffect(() => { db ? scheduleIdleTimer() : clearIdleTimer(); }, [db, autoLockMins]);
   useEffect(() => () => stopClipboardTicker(), []);
 
+  const [dbVersion, setDbVersion] = useState(0);
   const [fileLastModified, setFileLastModified] = useState<number>(0);
 
   /* --------- OPEN / SAVE --------- */
@@ -175,6 +176,7 @@ export default function App() {
       // Update our timestamp to match the new file we just wrote
       const newFile = await handle.getFile();
       setFileLastModified(newFile.lastModified);
+      setDbVersion(v => v + 1); // Refresh list to show accepted edits
 
       setDirty(false);
       setStatus("Saved");
@@ -199,6 +201,7 @@ export default function App() {
       a.click();
       URL.revokeObjectURL(a.href);
       setDirty(false);
+      setDbVersion(v => v + 1);
       setStatus("Saved (download)");
     } catch (e: any) {
       setStatus(e?.message || "Save failed");
@@ -212,6 +215,7 @@ export default function App() {
       const keyBytes = keyFile ? await keyFile.arrayBuffer() : undefined;
       const opened = await openKdbx(pendingBytes, password, keyBytes);
       setDb(opened);
+      setDbVersion(0);
       setDirty(false);
       setSelectedGroupId(null);
       setOpenedEntryId(null);
@@ -238,7 +242,7 @@ export default function App() {
     }
     db.groups?.forEach((g: any) => search(g));
     return found || db.getDefaultGroup?.() || db.groups?.[0] || null;
-  }, [db]);
+  }, [db, dbVersion]);
 
   const groupTree: GroupNode | null = useMemo(() => {
     if (!rootGroup) return null;
@@ -251,7 +255,7 @@ export default function App() {
       };
     }
     return build(rootGroup);
-  }, [rootGroup]);
+  }, [rootGroup, dbVersion]);
 
   /* --------- ENTRIES / FILTER --------- */
   const entries = useMemo(() => {
@@ -276,7 +280,7 @@ export default function App() {
     if (!selectedGroupId) collectAll(rootGroup);
     else collectFromId(rootGroup, selectedGroupId);
     return out;
-  }, [db, rootGroup, selectedGroupId]);
+  }, [db, rootGroup, selectedGroupId, dbVersion]);
 
   const filteredEntries = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -406,6 +410,7 @@ export default function App() {
       const newEntry = addNewEntry(db, rootGroup); // Adds to root group by default for now
       setOpenedEntryId(newEntry.uuid.id);
       markDirty();
+      setDbVersion(v => v + 1);
       setStatus("New entry added");
     } catch (e: any) {
       setStatus("Failed to add entry");
