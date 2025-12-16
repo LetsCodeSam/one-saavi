@@ -189,6 +189,9 @@ export default function App() {
         const newFile = await handle.getFile();
         setFileLastModified(newFile.lastModified);
         setStatus("Saved");
+
+        // Clear "Edited" highlights since we successfully wrote to disk
+        setModifiedIds(new Set());
       } else {
         // Mobile / Local Save
         const out = await saveKdbx(db);
