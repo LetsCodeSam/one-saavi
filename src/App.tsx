@@ -373,7 +373,7 @@ export default function App() {
       if (rec) {
         setFileName(rec.name);
         setHandle(null);
-        setPendingBytes
+        setPendingBytes(rec.bytes);
         setUnlockOpen(true);
         setStatus("Resumed local copy. Use Menu > Download .kdbx to sync.");
         return;
